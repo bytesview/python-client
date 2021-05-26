@@ -5,8 +5,7 @@ import unittest
 class test_newsdataapi(unittest.TestCase):
     def setUp(self):
         # your private API key.
-        #key = os.environ.get("PYTEST_TOKEN")
-        key = "pub_1893fc8648dd1d490ec89f920eec2d573"
+        key = os.environ.get("PYTEST_TOKEN")
         self.api = NewsDataApiClient(apikey=key)
 
     def test_news_api(self):
