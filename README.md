@@ -23,7 +23,7 @@ Newsdataapi docs can be seen [here](https://newsdata.io/docs).
 
 ### Latest News API
 
-`POST /1/news`
+`GET /1/news`
 
 ```
 from newsdataapi import NewsDataApiClient
@@ -57,7 +57,7 @@ response = api.news_api()
 
 ### News Archive API
 
-`POST /1/archive`
+`GET /1/archive`
 
 ```
 from newsdataapi import NewsDataApiClient
@@ -96,7 +96,7 @@ response = api.archive_api()
 
 ### News Sources API
 
-`POST /1/sources`
+`GET /1/sources`
 
 ```
 from newsdataapi import NewsDataApiClient
