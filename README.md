@@ -1,3 +1,5 @@
+![Alt text](https://raw.githubusercontent.com/newsdataapi/python-client/main/newsdata-logo.png)
+
 # <p align="center">Newsdataapi Python Client
 newsdataapi allows you to create a library for accessing http services easily, in a centralized way. An API defined by newsdataapi will return a JSON object when called.
 
@@ -120,7 +122,7 @@ response = api.sources_api()
 
 ## License
 
-Provided under by Matt Lisivick.
+Provided under [MIT License](https://github.com/newsdataapi/python-client/blob/main/LICENSE) by Matt Lisivick.
 
 ```
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
