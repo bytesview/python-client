@@ -3,6 +3,13 @@
 # <p align="center">Newsdataapi Python Client
 newsdataapi allows you to create a library for accessing http services easily, in a centralized way. An API defined by newsdataapi will return a JSON object when called.
 
+[![Build Status](https://img.shields.io/github/workflow/status/newsdataapi/python-client/Upload%20Python%20Package)](https://github.com/newsdataapi/python-client/actions/workflows/python-publish.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue)](https://github.com/newsdataapi/python-client/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/newsdataapi?color=084298)](https://pypi.org/project/newsdataapi)
+[![Supported Python versions]()](https://pypi.org/project/newsdataapi)
+[![Python](https://img.shields.io/badge/python-3-blue)](https://pypi.org/project/newsdataapi)
+
+
 <br />
 
 # Installation
