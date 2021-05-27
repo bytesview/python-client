@@ -19,7 +19,7 @@ class NewsDataApiClient(object):
                         Please make sure call session.close() after execute all calls to free up resource.   
         :type session: requests.Session
         """        
-        
+
         self.apikey = apikey
         # Check if session argument is None 
         if session is None:

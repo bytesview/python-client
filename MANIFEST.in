@@ -1,4 +1,4 @@
-include *.py
 include *.txt
+include *.py
 include LICENSE
 recursive-include tests *.py

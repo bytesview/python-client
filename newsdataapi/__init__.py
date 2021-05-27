@@ -1,1 +1,1 @@
-from newsdataapi.newsdataapi_client import NewsDataApiClient
+from newsdataapi.newsdataapi_client import NewsDataApiClient 

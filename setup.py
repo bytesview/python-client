@@ -21,7 +21,8 @@ setup(
     test_suite='tests',    
     python_requires='>=3.5',
     keywords=[
-        'news-data',
+        'news',
+        'news data',
         ],
     classifiers=[
         "Development Status :: 2 - Pre-Alpha",

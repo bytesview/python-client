@@ -1,4 +1,4 @@
-# All the API URL and language suported by API.
+# All the Newsdata supported API URL
 BASE_URL = 'https://newsdata.io/api/1/'
 
 # Latest News URL 

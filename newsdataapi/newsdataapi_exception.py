@@ -1,3 +1,4 @@
+
 class NewsdataException(Exception):
     """Base class for all other exceptions"""
 
