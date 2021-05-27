@@ -147,8 +147,8 @@ class NewsDataApiClient(object):
         :type language: string
         :param domain: A comma seperated string of domains (maximum 5) to restrict the search to. Use the /domains endpoint to find top sources id. 
         :type domain: string
-        :param from_data: A date and optional time for the oldest article allowed. This should be in ISO 8601 format (e.g. 2021-04-18 or 2021-04-18T04:04:34). 
-        :type from_data: string
+        :param from_date: A date and optional time for the oldest article allowed. This should be in ISO 8601 format (e.g. 2021-04-18 or 2021-04-18T04:04:34). 
+        :type from_date: string
         :param to_date: A date and optional time for the newest article allowed. This should be in ISO 8601 format (e.g. 2021-04-18 or 2021-04-18T04:04:34) 
         :type to_date: string        
         :param q: Keywords or phrases to search for in the news title and content. The value must be URL-encoded

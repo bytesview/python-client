@@ -86,7 +86,7 @@ response = api.archive_api()
 
 `domain` : A comma seperated string of domains (maximum 5) to restrict the search to. Use the /domains endpoint to find top sources id.
 
-`from_data` : A date and optional time for the oldest article allowed. This should be in ISO 8601 format (e.g. `2021-04-18` or `2021-04-18T04:04:34`)
+`from_date` : A date and optional time for the oldest article allowed. This should be in ISO 8601 format (e.g. `2021-04-18` or `2021-04-18T04:04:34`)
 
 `to_date` : A date and optional time for the newest article allowed. This should be in ISO 8601 format (e.g. `2021-04-18` or `2021-04-18T04:04:34`)
  
@@ -122,8 +122,6 @@ response = api.sources_api()
 `category` : A comma seperated string of categories (maximum 5) to restrict the search to. Possible Options: `top`, `business`, `science`, `technology`, `sports`, `health`, `entertainment`
 
 `language` : A comma seperated string of languages (maximum 5) to restrict the search to. Possible Options: `en`, `ar`, `jp`, `in`, `es`, `fr`
-
-`domain` : A comma seperated string of domains (maximum 5) to restrict the search to. Use the /domains endpoint to find top sources id.
 
 <br />
 

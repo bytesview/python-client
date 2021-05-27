@@ -2,7 +2,6 @@ import time
 
 def get(request_method, URL, URL_parameters_encoded, proxies, request_timeout):
     if proxies is None:
-        print(URL + "?" + URL_parameters_encoded)
         return request_method.get(URL + "?" + URL_parameters_encoded, timeout=request_timeout)
     else:
         return request_method.get(URL + "?" + URL_parameters_encoded, timeout=request_timeout, proxies = proxies)
