@@ -117,11 +117,11 @@ response = api.sources_api()
 ```
 `API key` : Your private Newsdata API key. 
 
-`country` : You can pass a comma seperated string of 2-letter ISO 3166-1 countries (maximum 5) to restrict the search to. Possible Options: `us` `gb` `in` `jp` `ae` `sa` `au` `ca` `sg` 
+`country` : Find sources that display news in a specific country. Possible Options: `us` `gb` `in` `jp` `ae` `sa` `au` `ca` `sg` 
 
-`category` : A comma seperated string of categories (maximum 5) to restrict the search to. Possible Options: `top`, `business`, `science`, `technology`, `sports`, `health`, `entertainment`
+`category` : Find sources that display news of this category. Possible Options: `top`, `business`, `science`, `technology`, `sports`, `health`, `entertainment`
 
-`language` : A comma seperated string of languages (maximum 5) to restrict the search to. Possible Options: `en`, `ar`, `jp`, `in`, `es`, `fr`
+`language` : Find sources that display news in a specific language. Possible Options: `en`, `ar`, `jp`, `in`, `es`, `fr`
 
 <br />
 
