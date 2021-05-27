@@ -210,11 +210,11 @@ class NewsDataApiClient(object):
         """ Sending GET request to the sources api"""
         
         """
-        :param country: A comma seperated string of 2-letter ISO 3166-1 countries (maximum 5) to restrict the search to. Possible Options: us, gb, in, jp, ae, sa, au, ca, sg
+        :param country: Find sources that display news in a specific country. Possible Options: us, gb, in, jp, ae, sa, au, ca, sg
         :type data: string
-        :param category: A comma seperated string of categories (maximum 5) to restrict the search to. Possible Options: top, business, science, technology, sports, health, entertainment 
+        :param category: Find sources that display news of this category. Possible Options: top, business, science, technology, sports, health, entertainment 
         :type category: string
-        :param language: A comma seperated string of languages (maximum 5) to restrict the search to. Possible Options: en, ar, jp, in, es, fr 
+        :param language: Find sources that display news in a specific language. Possible Options: en, ar, jp, in, es, fr 
         :type language: string
         :return: server response in JSON object 
         """
