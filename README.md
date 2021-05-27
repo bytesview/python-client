@@ -38,7 +38,7 @@ from newsdataapi import NewsDataApiClient
 # API key authorization, Initialize the client with your API key
 api = NewsDataApiClient(apikey="API key")
 
-# You can pass Empty or Request Parameters. ex(country = "us")
+# You can pass empty or with request parameters {ex. (country = "us")}
 response = api.news_api()
 
 ```
@@ -72,7 +72,7 @@ from newsdataapi import NewsDataApiClient
 # API key authorization, Initialize the client with your API key
 api = NewsDataApiClient(apikey="API key")
 
-# You can pass Empty or Request Parameters. ex(country = "us")
+# You can pass empty or with request parameters {ex. (country = "us")}
 response = api.archive_api()
 
 ```
@@ -111,7 +111,7 @@ from newsdataapi import NewsDataApiClient
 # API key authorization, Initialize the client with your API key
 api = NewsDataApiClient(apikey="API key")
 
-# You can pass Empty or Request Parameters. ex(country = "us")
+# You can pass empty or with request parameters {ex. (country = "us")}
 response = api.sources_api()
 
 ```
