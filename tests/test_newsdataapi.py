@@ -1,5 +1,5 @@
 import os
-from newsdataapi import NewsDataApiClient 
+from newsdataapi import NewsDataApiClient
 import unittest
 
 class test_newsdataapi(unittest.TestCase):
@@ -20,5 +20,10 @@ class test_newsdataapi(unittest.TestCase):
 
     def test_sources_api(self):
         response = self.api.sources_api()
+
+        self.assertEqual(response['status'], "success")
+
+    def test_crypto_api(self):
+        response = self.api.crypto_api()
 
         self.assertEqual(response['status'], "success")

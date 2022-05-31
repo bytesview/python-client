@@ -14,5 +14,3 @@ def MaxRetries(response, max_retries, retry_delay, request_method, URL, URL_para
             break
         max_retries-=1
     return response
-
-

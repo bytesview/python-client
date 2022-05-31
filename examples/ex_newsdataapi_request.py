@@ -18,3 +18,7 @@ print(response)
 # Sources API
 response = api.sources_api()
 print(response)
+
+# Crypto API
+response = api.crypto_api()
+print(response)
