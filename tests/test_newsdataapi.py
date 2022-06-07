@@ -1,5 +1,4 @@
 import os
-from newsdataapi import NewsDataApiClient
 import unittest
 
 class test_newsdataapi(unittest.TestCase):
