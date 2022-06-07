@@ -6,13 +6,13 @@ with open("README.md", "r") as fh:
 
 setup(
     name='newsdataapi',
-    version='0.1.4',
+    version='0.1.5',
     packages=['newsdataapi'],
     description='Python library for newsdata client-API Call',
     long_description=long_description,
     long_description_content_type="text/markdown",
     url='https://github.com/newsdataapi/python-client',
-    author='Newsdata',
+    author='NewsData.io',
     author_email='contact@newsdata.io',
     license='MIT',
     install_requires=["requests<3.0.0"],
