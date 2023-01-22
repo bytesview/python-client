@@ -1,6 +1,6 @@
 import requests
 from newsdataapi import constants
-from newsdataapi.utils import is_valid_string, is_valid_integer
+from newsdataapi.utils import is_valid_string
 from newsdataapi.newsdataapi_exception import NewsdataException
 from newsdataapi.helpers import get, MaxRetries
 from urllib.parse import urlencode, quote
@@ -107,14 +107,12 @@ class NewsDataApiClient(object):
 
         URL_parameters = {}
         news_data_input = [apikey, country, category, language, domain, q, qInTitle, page]
-        params_key = ["apikey", "country", "category", "language", "domain", "q", "qInTitle", "page"]
-        params_type = ["string", "string", "string", "string", "string", "string", "string", "integer"]
+        params_key = ["apikey", "country", "category", "language", "domain", "q", "qInTitle", "Page"]
+        params_type = ["string", "string", "string", "string", "string", "string", "string", "string"]
 
         for index, i in enumerate(news_data_input):
             if i is not None:
-                if ((is_valid_string(i))&(params_key[index]!="page")):
-                    URL_parameters[params_key[index]] = i
-                elif ((is_valid_integer(i))&(params_key[index]=="page")):
+                if (is_valid_string(i)):
                     URL_parameters[params_key[index]] = i
                 else:
                     raise TypeError(str(params_key[index]) + " should be of type " + params_type[index])
@@ -178,13 +176,11 @@ class NewsDataApiClient(object):
         URL_parameters = {}
         news_data_input = [apikey, country, category, language, domain, from_date, to_date, q, qInTitle, page]
         params_key = ["apikey", "country", "category", "language", "domain", "from_date", "to_date", "q", "qInTitle", "page"]
-        params_type = ["string", "string", "string", "string", "string", "string", "string", "string", "string", "integer"]
+        params_type = ["string", "string", "string", "string", "string", "string", "string", "string", "string", "string"]
 
         for index, i in enumerate(news_data_input):
             if i is not None:
-                if ((is_valid_string(i))&(params_key[index]!="page")):
-                    URL_parameters[params_key[index]] = i
-                elif ((is_valid_integer(i))&(params_key[index]=="page")):
+                if is_valid_string(i):
                     URL_parameters[params_key[index]] = i
                 else:
                     raise TypeError(str(params_key[index]) + " should be of type " + params_type[index])
@@ -288,13 +284,11 @@ class NewsDataApiClient(object):
         URL_parameters = {}
         news_data_input = [apikey, country, category, language, domain, q, qInTitle, page]
         params_key = ["apikey", "country", "category", "language", "domain", "q", "qInTitle", "page"]
-        params_type = ["string", "string", "string", "string", "string", "string", "string", "integer"]
+        params_type = ["string", "string", "string", "string", "string", "string", "string", "string"]
 
         for index, i in enumerate(news_data_input):
             if i is not None:
-                if ((is_valid_string(i))&(params_key[index]!="page")):
-                    URL_parameters[params_key[index]] = i
-                elif ((is_valid_integer(i))&(params_key[index]=="page")):
+                if is_valid_string(i):
                     URL_parameters[params_key[index]] = i
                 else:
                     raise TypeError(str(params_key[index]) + " should be of type " + params_type[index])

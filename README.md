@@ -157,6 +157,34 @@ response = api.crypto_api()
 
 <br />
 
+### News API with Pagination
+
+`GET /1/news`
+
+```
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+api = NewsDataApiClient(apikey="API key")
+
+# You can pass empty or with request parameters {ex. (country = "us")}
+response = api.news_api()
+
+# You can go to next page by providing Page parameter
+response = api.news_api(page = "nextPage value")
+
+# You can paginate till last page by providing Page parameter in Loop
+page=None
+while True:
+    response = api.news_api(page = page)
+    page = response.get('nextPage',None)
+    if not page:
+        break
+
+```
+
+<br />
+
 ## License
 
 Provided under [MIT License](https://github.com/newsdataapi/python-client/blob/main/LICENSE) by Matt Lisivick.
