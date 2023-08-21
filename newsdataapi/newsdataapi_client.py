@@ -1,309 +1,207 @@
-import requests
+import requests,time
 from newsdataapi import constants
-from newsdataapi.utils import is_valid_string
-from newsdataapi.newsdataapi_exception import NewsdataException
-from newsdataapi.helpers import get, MaxRetries
+from typing import Optional,Union
 from urllib.parse import urlencode, quote
+from newsdataapi.newsdataapi_exception import NewsdataException
 
-class NewsDataApiClient(object):
+class NewsDataApiClient:
 
-    def __init__(self, apikey=None, session=None):
-
-        """ Initializes newsdata client object for access Newsdata APIs """
-
-        """
-        :param apikey: your API key.
-        :type apikey:  string
-        :param session: Default value for this argument is None but if you’re making several requests to the same host,
-                        the underlying TCP connection will be reused, which can result in a significant performance increase.
-                        Please make sure call session.close() after execute all calls to free up resource.
-        :type session: requests.Session
-        """
-
+    def __init__(
+            self, apikey:str, session:bool= False, max_retries:int= constants.DEFAULT_MAX_RETRIES, retry_delay:int= constants.DEFAULT_RETRY_DELAY,
+            proxies:Optional[dict]=None, request_timeout:int= constants.DEFAULT_REQUEST_TIMEOUT,max_result:int=10**10
+        ):
+        """Initializes newsdata client object for access Newsdata APIs."""
         self.apikey = apikey
-        # Check if session argument is None
-        if session is None:
-            self.request_method = requests
-        else:
-            self.request_method = session
+        self.request_method:requests = requests if session == False else requests.Session()
+        self.max_result = max_result
+        self.max_retries = max_retries
+        self.retry_delay = retry_delay
+        self.proxies = proxies
+        self.request_timeout = request_timeout
+        self.recursive_retry = max_retries
 
-        # Default value for maximum retries and retry delay is zero
-        self.max_retries = 0
-        self.retry_delay = 0
-
-        # Default proxies value is none
-        self.proxies = None
-
-        # set request timeout
-        self.request_timeout = constants.DEFAULT_REQUEST_TIMEOUT
-
-    def set_retries( self, max_retries=0, retry_delay = 0):
-        """ API maximum retry and delay when getting 500 error """
-
-        """
-        :param max_retries: Your maximum retries when server responding with 500 internal error, Default value for this augument is zero.
-        :type max_retries:  integer
-        :param retry_delay: Delay(in seconds) between retries when server responding with 500 error, Default value for this augument
-                            is zero seconds.
-        :type retry_delay:  integer
-        """
+    def set_retries( self, max_retries:int, retry_delay:int)->None:
+        """ API maximum retry and delay"""
         self.max_retries = max_retries
         self.retry_delay = retry_delay
 
-    def set_request_timeout( self, request_timeout = constants.DEFAULT_REQUEST_TIMEOUT):
+    def set_request_timeout( self, request_timeout:int)->None:
         """ API maximum timeout for the request """
-
-        """
-        :param request_timeout: How many seconds to wait for the client to make a connection and/or send a response.
-        :type request_timeout:  integer
-        """
         self.request_timeout = request_timeout
 
-    def api_proxies( self, proxies):
+    def api_proxies( self, proxies:dict)->None:
         """ Configure Proxie dictionary """
-
-        """
-        :param proxies: A dictionary of the protocol to the proxy url ( ex.{ "https" : "https://1.1.1.1:80"}).
-        :type proxies:  dictionary
-        """
         self.proxies = proxies
+    
+    def __validate_parms(self,param:str,value:Union[list,int,str,bool])->dict:
+        bool_params = {'full_content','image','video'}
+        int_params = {'size','prioritydomain','timeframe'}
+        string_params = {'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page','from_date','to_date','apikey'}
 
+        if param in string_params:
+            if isinstance(value,list):
+                value = ','.join(value)
+            if not isinstance(value,str):
+                raise TypeError(f'{param} should be of type string.')
+        elif param in bool_params:
+            if not isinstance(value,bool):
+                raise TypeError(f'{param} should be of type bool.')
+            value = 1 if value == True else 0
+        elif param in int_params:
+            if not isinstance(value,int):
+                raise TypeError(f'{param} should be of type int.')
 
-    def news_api( self, country=None, category=None, language=None, domain=None, q=None, qInTitle=None, page=None):
-        """ Sending GET request to the news api"""
+        return {param:value}
+    
+    def __get_feeds(self,url:str)-> dict:
+        try:
+            if self.recursive_retry <= 0:
+                raise  NewsdataException('maximum retry limit reached.')
+            response = self.request_method.get(url=url,proxies=self.proxies,timeout=self.request_timeout)
+            feeds_data:dict = response.json()
+            if response.status_code != 200:
+                if response.status_code == 500 or feeds_data.get('results',{}).get('code') == 'TooManyRequests' or feeds_data.get('results',{}).get('code') == 'RateLimitExceeded':
+                    time.sleep(self.retry_delay)
+                    self.recursive_retry-=1
+                    return self.__get_feeds(url=url)
+                raise NewsdataException(response.json())
+            else:
+                self.recursive_retry = self.max_retries
+                return feeds_data
+        except requests.exceptions.ConnectionError:
+            time.sleep(self.retry_delay)
+            if isinstance(self.request_method,requests.Session):
+                self.request_method = requests.Session()
+            self.recursive_retry-=1
+            return self.__get_feeds(url=url)
 
+    def __get_feeds_all(self,url:str)-> dict:
+        if not isinstance(self.max_result,int):
+            raise TypeError('max_result should be of type int.')
+        
+        if not isinstance(self.request_method,requests.Session):
+            self.request_method = requests.Session()
+
+        feeds_count = 0
+        data = {'totalResults':None,'results':[],'nextPage':True}
+        while data.get("nextPage"):
+            response = self.__get_feeds(url=f'{url}&page={data.get("nextPage")}' if data.get('results') else url)
+            data['totalResults'] = response.get('totalResults')
+            results = response.get('results')
+            for feed in results:
+                data['results'].append(feed)
+                feeds_count+=1
+                if feeds_count >= self.max_result:
+                    return data
+            data['nextPage'] = response.get('nextPage')
+            time.sleep(0.5)
+        return data
+
+    def news_api(
+            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
+            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[int]=None, size:Optional[int]=None,
+            domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
+            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[int]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
+            max_result:Optional[int]=None
+        )->dict:
+        """ 
+        Sending GET request to the news api.
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
-        :param country: A comma seperated string of 2-letter ISO 3166-1 countries (maximum 5) to restrict the search to. Possible Options: us, gb, in, jp, ae, sa, au, ca, sg
-        :type data: string
-        :param category: A comma seperated string of categories (maximum 5) to restrict the search to. Possible Options: top, business, science, technology, sports, health, entertainment
-        :type category: string
-        :param language: A comma seperated string of languages (maximum 5) to restrict the search to. Possible Options: en, ar, jp, in, es, fr
-        :type language: string
-        :param domain: A comma seperated string of domains (maximum 5) to restrict the search to. Use the /domains endpoint to find top sources id.
-        :type domain: string
-        :param q: Keywords or phrases to search for in the news title and content. The value must be URL-encoded
-                Advance search options:
-                Search Social.
-                    q=social
-                Search "Social Pizza".
-                    q=social pizza
-                Search Social but not with pizza. social -pizza
-                    q=social -pizza
-                Search Social but not with pizza and wildfire. social -pizza -wildfire
-                    q=social -pizza -wildfire
-                Search multiple keyword with AND operator. social AND pizza
-                    q=social AND pizza
-        :type q: string
-        :param qInTitle: Keywords or phrases to search for in the news title only.
-        :type qInTitle: string
-        :param page: Use this to page through the results if the total results found is greater than the page size.
-        :type page: integer
-        :return: server response in JSON object
-        """
-
-        if self.apikey is None:
-            raise ValueError("Please provide your private API Key")
-        apikey = self.apikey
+        params = {
+            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':timeframe,'size':size,
+            'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
+            'page':page,
+        }
 
         URL_parameters = {}
-        news_data_input = [apikey, country, category, language, domain, q, qInTitle, page]
-        params_key = ["apikey", "country", "category", "language", "domain", "q", "qInTitle", "Page"]
-        params_type = ["string", "string", "string", "string", "string", "string", "string", "string"]
-
-        for index, i in enumerate(news_data_input):
-            if i is not None:
-                if (is_valid_string(i)):
-                    URL_parameters[params_key[index]] = i
-                else:
-                    raise TypeError(str(params_key[index]) + " should be of type " + params_type[index])
+        for key,value in params.items():
+            if value is not None:
+                URL_parameters.update(self.__validate_parms(param=key,value=value))
 
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
+        if scroll == True:
+            if max_result:
+                self.max_result = max_result 
+            return self.__get_feeds_all(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}')
+        else:
+            return self.__get_feeds(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}') 
 
-        # Make a GET request to constants.NEWS_URL
-        response = get(self.request_method, constants.NEWS_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        if response.status_code == 500:
-            response = MaxRetries(response, self.max_retries, self.retry_delay, self.request_method, constants.NEWS_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        # Check the status code of the response if not equal to 200, then raise exception
-        if response.status_code != 200:
-            raise NewsdataException(response.json())
-
-        # Return the response json
-        return response.json()
-
-
-    def archive_api( self, country=None, category=None, language=None, domain=None, from_date=None, to_date=None, q=None, qInTitle=None, page=None):
-        """ Sending GET request to the archive api"""
-
+    def archive_api(
+            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
+            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None,
+            excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None,
+            video:Optional[bool]=None,prioritydomain:Optional[int]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
+            from_date:Optional[str]=None, to_date:Optional[str]=None
+    ) -> dict:
         """
-        :param country: A comma seperated string of 2-letter ISO 3166-1 countries (maximum 5) to restrict the search to. Possible Options: us, gb, in, jp, ae, sa, au, ca, sg
-        :type data: string
-        :param category: A comma seperated string of categories (maximum 5) to restrict the search to. Possible Options: top, business, science, technology, sports, health, entertainment
-        :type category: string
-        :param language: A comma seperated string of languages (maximum 5) to restrict the search to. Possible Options: en, ar, jp, in, es, fr
-        :type language: string
-        :param domain: A comma seperated string of domains (maximum 5) to restrict the search to. Use the /domains endpoint to find top sources id.
-        :type domain: string
-        :param from_date: A date and optional time for the oldest article allowed. This should be in ISO 8601 format (e.g. 2021-04-18 or 2021-04-18T04:04:34).
-        :type from_date: string
-        :param to_date: A date and optional time for the newest article allowed. This should be in ISO 8601 format (e.g. 2021-04-18 or 2021-04-18T04:04:34)
-        :type to_date: string
-        :param q: Keywords or phrases to search for in the news title and content. The value must be URL-encoded
-                Advance search options:
-                Search Social.
-                    q=social
-                Search "Social Pizza".
-                    q=social pizza
-                Search Social but not with pizza. social -pizza
-                    q=social -pizza
-                Search Social but not with pizza and wildfire. social -pizza -wildfire
-                    q=social -pizza -wildfire
-                Search multiple keyword with AND operator. social AND pizza
-                    q=social AND pizza
-        :type q: string
-        :param qInTitle: Keywords or phrases to search for in the news title only.
-        :type qInTitle: string
-        :param page: Use this to page through the results if the total results found is greater than the page size.
-        :type page: integer
-        :return: server response in JSON object
+        Sending GET request to the archive api
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
+        params = {
+            'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,'excludedomain':excludedomain,
+            'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
+            'apikey':self.apikey
+        }
+        URL_parameters = {}
+        for key,value in params.items():
+            if value is not None:
+                URL_parameters.update(self.__validate_parms(param=key,value=value))
 
-        if self.apikey is None:
-            raise ValueError("Please provide your private API Key")
-        apikey = self.apikey
+        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
+        if scroll == True:
+            if max_result:
+                self.max_result = max_result 
+            return self.__get_feeds_all(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}')
+        else:
+            return self.__get_feeds(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}') 
+    
+    def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None):
+        """ 
+        Sending GET request to the sources api
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
+        """
+        URL_parameters = {}
+        params = {"apikey":self.apikey, "country":country, "category":category, "language":language}
 
         URL_parameters = {}
-        news_data_input = [apikey, country, category, language, domain, from_date, to_date, q, qInTitle, page]
-        params_key = ["apikey", "country", "category", "language", "domain", "from_date", "to_date", "q", "qInTitle", "page"]
-        params_type = ["string", "string", "string", "string", "string", "string", "string", "string", "string", "string"]
-
-        for index, i in enumerate(news_data_input):
-            if i is not None:
-                if is_valid_string(i):
-                    URL_parameters[params_key[index]] = i
-                else:
-                    raise TypeError(str(params_key[index]) + " should be of type " + params_type[index])
+        for key,value in params.items():
+            if value is not None:
+                URL_parameters.update(self.__validate_parms(param=key,value=value))
 
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
+        return self.__get_feeds(url=f'{constants.SOURCES_URL}?{URL_parameters_encoded}')
 
-        # Make a GET request to constants.ARCHIVE_URL
-        response = get(self.request_method, constants.ARCHIVE_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        if response.status_code == 500:
-            response = MaxRetries(response, self.max_retries, self.retry_delay, self.request_method, constants.ARCHIVE_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        # Check the status code of the response if not equal to 200, then raise exception
-        if response.status_code != 200:
-            raise NewsdataException(response.json())
-
-        # Return the response json
-        return response.json()
-
-
-
-    def sources_api( self, country=None, category=None, language=None):
-        """ Sending GET request to the sources api"""
-
-        """
-        :param country: Find sources that display news in a specific country. Possible Options: us, gb, in, jp, ae, sa, au, ca, sg
-        :type data: string
-        :param category: Find sources that display news of this category. Possible Options: top, business, science, technology, sports, health, entertainment
-        :type category: string
-        :param language: Find sources that display news in a specific language. Possible Options: en, ar, jp, in, es, fr
-        :type language: string
-        :return: server response in JSON object
+    def crypto_api(
+            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
+            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[int]=None, size:Optional[int]=None,
+            domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
+            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[int]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
+            max_result:Optional[int]=None
+        )->dict:
+        """ 
+        Sending GET request to the crypto api
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
 
-        if self.apikey is None:
-            raise ValueError("Please provide your private API Key")
-        apikey = self.apikey
+        params = {
+            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
+            'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'timeframe':timeframe
+        }
 
         URL_parameters = {}
-        news_data_input = [apikey, country, category, language]
-        params_key = ["apikey", "country", "category", "language"]
-
-        for index, i in enumerate(news_data_input):
-            if i is not None:
-                if is_valid_string(i):
-                    URL_parameters[params_key[index]] = i
-                else:
-                    raise TypeError(str(params_key[index]) + " should be of type string")
+        for key,value in params.items():
+            if value is not None:
+                URL_parameters.update(self.__validate_parms(param=key,value=value))
 
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
+        if scroll == True:
+            if max_result:
+                self.max_result = max_result 
+            return self.__get_feeds_all(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}')
+        else:
+            return self.__get_feeds(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}') 
 
-        # Make a GET request to constants.SOURCES_URL
-        response = get(self.request_method, constants.SOURCES_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        if response.status_code == 500:
-            response = MaxRetries(response, self.max_retries, self.retry_delay, self.request_method, constants.SOURCES_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        # Check the status code of the response if not equal to 200, then raise exception
-        if response.status_code != 200:
-            raise NewsdataException(response.json())
-
-        # Return the response json
-        return response.json()
-
-    def crypto_api( self, country=None, category=None, language=None, domain=None, q=None, qInTitle=None, page=None):
-        """ Sending GET request to the crypto api"""
-
-        """
-        :param country: A comma seperated string of 2-letter ISO 3166-1 countries (maximum 5) to restrict the search to. Possible Options: us, gb, in, jp, ae, sa, au, ca, sg
-        :type data: string
-        :param category: A comma seperated string of categories (maximum 5) to restrict the search to. Possible Options: top, business, science, technology, sports, health, entertainment
-        :type category: string
-        :param language: A comma seperated string of languages (maximum 5) to restrict the search to. Possible Options: en, ar, jp, in, es, fr
-        :type language: string
-        :param domain: A comma seperated string of domains (maximum 5) to restrict the search to. Use the /domains endpoint to find top sources id.
-        :type domain: string
-        :param q: Keywords or phrases to search for in the news title and content. The value must be URL-encoded
-                Advance search options:
-                Search Bitcoin.
-                    q=bitcoin
-                Search "Bitcoin Ethereum".
-                    q=bitcoin ethereum
-                Search Bitcoin but not with Ethereum.
-                    q=bitcoin -ethereum
-                Search Bitcoin but not with Ethereum and Dogecoin. bitcoin -ethereum -dogecoin
-                    q=bitcoin -ethereum -dogecoin
-                Search multiple keyword with AND operator. bitcoin AND ethereum
-                    q=bitcoin AND ethereum
-        :type q: string
-        :param qInTitle: Keywords or phrases to search for in the news title only.
-        :type qInTitle: string
-        :param page: Use this to page through the results if the total results found is greater than the page size.
-        :type page: integer
-        :return: server response in JSON object
-        """
-
-        if self.apikey is None:
-            raise ValueError("Please provide your private API Key")
-        apikey = self.apikey
-
-        URL_parameters = {}
-        news_data_input = [apikey, country, category, language, domain, q, qInTitle, page]
-        params_key = ["apikey", "country", "category", "language", "domain", "q", "qInTitle", "page"]
-        params_type = ["string", "string", "string", "string", "string", "string", "string", "string"]
-
-        for index, i in enumerate(news_data_input):
-            if i is not None:
-                if is_valid_string(i):
-                    URL_parameters[params_key[index]] = i
-                else:
-                    raise TypeError(str(params_key[index]) + " should be of type " + params_type[index])
-
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-
-        # Make a GET request to constants.CRYPTO_URL
-        response = get(self.request_method, constants.CRYPTO_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        if response.status_code == 500:
-            response = MaxRetries(response, self.max_retries, self.retry_delay, self.request_method, constants.CRYPTO_URL, URL_parameters_encoded, self.proxies, self.request_timeout)
-
-        # Check the status code of the response if not equal to 200, then raise exception
-        if response.status_code != 200:
-            raise NewsdataException(response.json())
-
-        # Return the response json
-        return response.json()
+    def __del__(self):
+        if isinstance(self.request_method,requests.Session):
+            self.request_method.close()

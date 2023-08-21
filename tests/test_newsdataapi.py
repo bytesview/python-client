@@ -1,6 +1,5 @@
-import os
+import os,unittest
 from newsdataapi import NewsDataApiClient 
-import unittest
 
 class test_newsdataapi(unittest.TestCase):
     def setUp(self):
@@ -14,7 +13,7 @@ class test_newsdataapi(unittest.TestCase):
         self.assertEqual(response['status'], "success")
 
     def test_archive_api(self):
-        response = self.api.archive_api()
+        response = self.api.archive_api(q='test')
 
         self.assertEqual(response['status'], "success")
 
