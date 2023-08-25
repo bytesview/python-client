@@ -11,7 +11,7 @@ print(response)
 
 
 # Archive API
-response = api.archive_api()
+response = api.archive_api(q='test')
 print(response)
 
 
