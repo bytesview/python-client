@@ -25,7 +25,157 @@ pip install newsdataapi
 
 ## Documentation
 
-Newsdataapi docs can be seen [here](https://newsdata.io/docs).
+Newsdataapi docs can be seen [here](https://newsdata.io/documentation).
+
+<br />
+
+### Latest News API
+
+`GET /1/news`
+
+```
+# To get latest news use our news_api method.
+
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+
+api = NewsDataApiClient(apikey='YOUR_API_KEY')
+response = api.news_api(q='entertainment')
+print(response)
+
+# Latest news with page parameter
+
+response = api.news_api(q='entertainment',page='nextPage_value')
+print(response)
+
+# To scroll through all latest news
+
+response = api.news_api(q='entertainment',page='nextPage_value',scroll=True)
+print(response)
+
+```
+<br />
+
+### News Archive API
+
+`GET /1/archive`
+
+```
+# To get archive news use our archive_api method.
+
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+
+api = NewsDataApiClient(apikey='YOUR_API_KEY')
+response = api.archive_api(q='olympic',from_date='2021-01-01',to_date='2021-06-06')
+print(response)
+
+# Archive news with page parameter
+
+response = api.archive_api(q='olympic',from_date='2021-01-01',to_date='2021-06-06',page='nextPage_value')
+print(response)
+
+# To scroll through all archive news
+
+response = api.archive_api(q='olympic',from_date='2021-01-01',to_date='2021-06-06',page='nextPage_value',scroll=True)
+print(response)
+
+```
+<br />
+
+
+### News Sources API
+
+`GET /1/sources`
+
+```
+# To get sources use our sources_api method.
+
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+
+api = NewsDataApiClient(apikey="YOUR_API_KEY")
+response = api.sources_api()
+print(response)
+
+```
+<br />
+
+### Crypto News API
+
+`GET /1/crypto`
+
+```
+# To get crypto news use our crypto_api method.
+
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+
+api = NewsDataApiClient(apikey='YOUR_API_KEY')
+response = api.crypto_api(q='bitcoin')
+print(response)
+
+# Crypto with page parameter
+
+response = api.crypto_api(q='bitcoin',page='nextPage_value')
+print(response)
+
+# To scroll through all crypto news
+
+response = api.crypto_api(q='bitcoin',page='nextPage_value',scroll=True)
+print(response)
+
+```
+<br />
+
+### News API with Pagination
+
+`GET /1/news`
+
+```
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+
+api = NewsDataApiClient(apikey="YOUR_API_KEY")
+response = api.news_api()
+
+# You can go to next page by providing Page parameter
+
+response = api.news_api(page = "nextPage value")
+
+# You can paginate till last page by providing Page parameter in Loop
+
+page=None
+while True:
+    response = api.news_api(page = page)
+    page = response.get('nextPage',None)
+    if not page:
+        break
+
+```
+
+<br />
+
+### News API with Scrolling
+
+```
+# Note: Scrolling through all result will counsume api as per your defined size. you can also define max_result to stop scrolling at desired result size.scroll is avaliable in news_archive,news_api and news_crypto, it will return all result when scrolling is compleated.
+
+from newsdataapi import NewsDataApiClient
+
+# API key authorization, Initialize the client with your API key
+
+api = NewsDataApiClient(apikey="YOUR_API_KEY")
+
+response = api.news_api(q='entertainment',page='nextPage_value',scroll=True,max_result=1000)
+print(response)
+
+```
 
 <br />
 
