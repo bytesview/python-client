@@ -37,8 +37,8 @@ class NewsDataApiClient:
     
     def __validate_parms(self,param:str,value:Union[list,int,str,bool])->dict:
         bool_params = {'full_content','image','video'}
-        int_params = {'size','prioritydomain','timeframe'}
-        string_params = {'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page','from_date','to_date','apikey','qInMeta'}
+        int_params = {'size','timeframe'}
+        string_params = {'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page','from_date','to_date','apikey','qInMeta','prioritydomain'}
 
         if param in string_params:
             if isinstance(value,list):
@@ -119,7 +119,7 @@ class NewsDataApiClient:
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[int]=None, size:Optional[int]=None,
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
-            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[int]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
+            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
             max_result:Optional[int]=None, qInMeta:Optional[str]=None
         )->dict:
         """ 
@@ -149,7 +149,7 @@ class NewsDataApiClient:
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None,
             excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None,
-            video:Optional[bool]=None,prioritydomain:Optional[int]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
+            video:Optional[bool]=None,prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
             from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None
     ) -> dict:
         """
@@ -194,7 +194,7 @@ class NewsDataApiClient:
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[int]=None, size:Optional[int]=None,
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
-            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[int]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
+            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
             max_result:Optional[int]=None, qInMeta:Optional[str]=None
         )->dict:
         """ 
