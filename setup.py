@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name='newsdataapi',
-    version='0.1.7',
+    version='0.1.8',
     packages=['newsdataapi'],
     description='Python library for newsdata client-API Call',
     long_description=long_description,
