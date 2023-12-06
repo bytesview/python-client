@@ -127,8 +127,8 @@ class NewsDataApiClient:
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         params = {
-            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe),'size':size,
-            'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
+            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
+            'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
             'page':page,'qInMeta':qInMeta
         }
 
@@ -205,7 +205,7 @@ class NewsDataApiClient:
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
-            'timeframe':str(timeframe),'qInMeta':qInMeta
+            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta
         }
 
         URL_parameters = {}
