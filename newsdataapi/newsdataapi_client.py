@@ -36,7 +36,7 @@ class NewsDataApiClient:
         self.proxies = proxies
     
     def __validate_parms(self,param:str,value:Union[list,int,str,bool])->dict:
-        bool_params = {'full_content','image','video'}
+        bool_params = {'full_content','image','video','cryptofeeds'}
         int_params = {'size','timeframe'}
         string_params = {'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page','from_date','to_date','apikey','qInMeta','prioritydomain'}
 
@@ -150,7 +150,7 @@ class NewsDataApiClient:
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None,
             excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None,
             video:Optional[bool]=None,prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
-            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None
+            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None, cryptofeeds:Optional[bool]=None
     ) -> dict:
         """
         Sending GET request to the archive api
@@ -159,7 +159,7 @@ class NewsDataApiClient:
         params = {
             'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,'excludedomain':excludedomain,
             'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
-            'apikey':self.apikey,'qInMeta':qInMeta
+            'apikey':self.apikey,'qInMeta':qInMeta,'cryptofeeds':cryptofeeds
         }
         URL_parameters = {}
         for key,value in params.items():
@@ -174,13 +174,13 @@ class NewsDataApiClient:
         else:
             return self.__get_feeds(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}') 
     
-    def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None):
+    def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None, prioritydomain:Optional[str]= None):
         """ 
         Sending GET request to the sources api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         URL_parameters = {}
-        params = {"apikey":self.apikey, "country":country, "category":category, "language":language}
+        params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain}
 
         URL_parameters = {}
         for key,value in params.items():
