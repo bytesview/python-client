@@ -38,7 +38,10 @@ class NewsDataApiClient:
     def __validate_parms(self,param:str,value:Union[list,int,str,bool])->dict:
         bool_params = {'full_content','image','video','cryptofeeds'}
         int_params = {'size'}
-        string_params = {'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page','from_date','to_date','apikey','qInMeta','prioritydomain','timeframe'}
+        string_params = {
+            'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page',
+            'from_date','to_date','apikey','qInMeta','prioritydomain','timeframe','tag','sentiment','region'
+        }
 
         if param in string_params:
             if isinstance(value,list):
@@ -120,7 +123,8 @@ class NewsDataApiClient:
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
             image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
-            max_result:Optional[int]=None, qInMeta:Optional[str]=None
+            max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
+            region:Optional[Union[str,list]]=None
         )->dict:
         """ 
         Sending GET request to the news api.
@@ -129,7 +133,7 @@ class NewsDataApiClient:
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta
+            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region
         }
 
         URL_parameters = {}
@@ -195,7 +199,7 @@ class NewsDataApiClient:
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
             image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
-            max_result:Optional[int]=None, qInMeta:Optional[str]=None
+            max_result:Optional[int]=None, qInMeta:Optional[str]=None,tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
         )->dict:
         """ 
         Sending GET request to the crypto api
@@ -205,7 +209,7 @@ class NewsDataApiClient:
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
-            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta
+            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment
         }
 
         URL_parameters = {}
