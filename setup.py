@@ -1,4 +1,4 @@
-from setuptools import find_packages, setup
+from setuptools import setup
 
 with open("README.md", "r") as fh:
     long_description = fh.read()
@@ -6,7 +6,7 @@ with open("README.md", "r") as fh:
 
 setup(
     name='newsdataapi',
-    version='0.1.11',
+    version='0.1.12',
     packages=['newsdataapi'],
     description='Python library for newsdata client-API Call',
     long_description=long_description,

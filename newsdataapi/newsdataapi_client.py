@@ -1,7 +1,7 @@
 import requests,time
-from datetime import datetime
 from newsdataapi import constants
 from typing import Optional,Union
+from datetime import datetime,timezone
 from urllib.parse import urlencode, quote
 from newsdataapi.newsdataapi_exception import NewsdataException
 
@@ -40,7 +40,7 @@ class NewsDataApiClient:
         int_params = {'size'}
         string_params = {
             'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page',
-            'from_date','to_date','apikey','qInMeta','prioritydomain','timeframe','tag','sentiment','region'
+            'from_date','to_date','apikey','qInMeta','prioritydomain','timeframe','tag','sentiment','region','coin'
         }
 
         if param in string_params:
@@ -61,28 +61,28 @@ class NewsDataApiClient:
     def __get_feeds(self,url:str)-> dict:
         try:
             if self.recursive_retry <= 0:
-                raise  NewsdataException('maximum retry limit reached.')
+                raise  NewsdataException('Maximum retry limit reached. For more information use debug parameter while initializing NewsDataApiClient.')
             response = self.request_method.get(url=url,proxies=self.proxies,timeout=self.request_timeout)
             if self.is_debug == True:
                 headers = response.headers
-                print(f'Debug | {datetime.utcnow().replace(microsecond=0)} | x_rate_limit_remaining: {headers.get("x_rate_limit_remaining")} | x_api_limit_remaining: {headers.get("x_api_limit_remaining")}')
+                print(f'Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | x_rate_limit_remaining: {headers.get("x_rate_limit_remaining")} | x_api_limit_remaining: {headers.get("x_api_limit_remaining")}')
             feeds_data:dict = response.json()
             if response.status_code != 200:
                 if response.status_code == 500:
                     if self.is_debug == True:
-                        print(f"Debug | {datetime.utcnow().replace(microsecond=0)} | Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
+                        print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
                     time.sleep(self.retry_delay)
                     self.recursive_retry-=1
                     return self.__get_feeds(url=url)
                 elif feeds_data.get('results',{}).get('code') == 'TooManyRequests':
                     if self.is_debug == True:
-                        print(f"Debug | {datetime.utcnow().replace(microsecond=0)} | Encountered 'TooManyRequests' going to sleep for: {constants.DEFAULT_RETRY_DELAY_TooManyRequests} seconds.")
+                        print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'TooManyRequests' going to sleep for: {constants.DEFAULT_RETRY_DELAY_TooManyRequests} seconds.")
                     time.sleep(constants.DEFAULT_RETRY_DELAY_TooManyRequests)
                     self.recursive_retry-=1
                     return self.__get_feeds(url=url)
                 elif feeds_data.get('results',{}).get('code') == 'RateLimitExceeded':
                     if self.is_debug == True:
-                        print(f"Debug | {datetime.utcnow().replace(microsecond=0)} | Encountered 'RateLimitExceeded' going to sleep for: {constants.DEFAULT_RETRY_DELAY_RateLimitExceeded} seconds.")
+                        print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'RateLimitExceeded' going to sleep for: {constants.DEFAULT_RETRY_DELAY_RateLimitExceeded} seconds.")
                     time.sleep(constants.DEFAULT_RETRY_DELAY_RateLimitExceeded)
                     self.recursive_retry-=1
                     return self.__get_feeds(url=url)
@@ -195,11 +195,11 @@ class NewsDataApiClient:
         return self.__get_feeds(url=f'{constants.SOURCES_URL}?{URL_parameters_encoded}')
 
     def crypto_api(
-            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
-            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,
-            domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
-            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
-            max_result:Optional[int]=None, qInMeta:Optional[str]=None,tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
+            self, q:Optional[str]=None, qInTitle:Optional[str]=None,language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None,
+            timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None,
+            timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, 
+            page:Optional[str]=None, scroll:Optional[bool]=False,max_result:Optional[int]=None, qInMeta:Optional[str]=None,tag:Optional[Union[str,list]]=None, 
+            sentiment:Optional[str]=None,coin:Optional[Union[str, list]]=None
         )->dict:
         """ 
         Sending GET request to the crypto api
@@ -207,9 +207,9 @@ class NewsDataApiClient:
         """
 
         params = {
-            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
+            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
-            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment
+            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin
         }
 
         URL_parameters = {}
