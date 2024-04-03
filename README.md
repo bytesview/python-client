@@ -1,5 +1,5 @@
 
-[![NewsData.io logo](newsdata-logo.png)](https://newsdata.io)
+[![NewsData.io logo](https://raw.githubusercontent.com/bytesview/python-client/main/newsdata-logo.png)](https://newsdata.io)
 
 # <p align="center">NewsData.io Python Client
 
