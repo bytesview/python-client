@@ -15,6 +15,7 @@ class NewsDataApiClient:
         self.apikey = apikey
         self.request_method:requests = requests if session == False else requests.Session()
         self.max_result = max_result
+        self.max_result_scroll = max_result
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.proxies = proxies
@@ -92,13 +93,16 @@ class NewsDataApiClient:
                 self.recursive_retry = self.max_retries
                 return feeds_data
         except requests.exceptions.ConnectionError:
+            if self.is_debug == True:
+                print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'ConnectionError' going to sleep for: {self.retry_delay} seconds.")
+            time.sleep(self.retry_delay)
             if isinstance(self.request_method,requests.Session):
                 self.request_method = requests.Session()
             self.recursive_retry-=1
             return self.__get_feeds(url=url)
 
     def __get_feeds_all(self,url:str)-> dict:
-        if not isinstance(self.max_result,int):
+        if not isinstance(self.max_result_scroll,int):
             raise TypeError('max_result should be of type int.')
         
         if not isinstance(self.request_method,requests.Session):
@@ -113,10 +117,16 @@ class NewsDataApiClient:
             data['results'].extend(results)
             data['nextPage'] = response.get('nextPage')
             feeds_count+=len(results)
-            if feeds_count >= self.max_result:
+            if feeds_count >= self.max_result_scroll:
                 return data
             time.sleep(0.5)
         return data
+
+    def _reset_recursive_retry(self):
+        self.recursive_retry = self.max_retries
+
+    def _reset_max_result(self):
+        self.max_result_scroll = self.max_result
 
     def news_api(
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
@@ -135,7 +145,7 @@ class NewsDataApiClient:
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
             'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region
         }
-
+        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -144,7 +154,9 @@ class NewsDataApiClient:
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             if max_result:
-                self.max_result = max_result 
+                self.max_result_scroll = max_result
+            else:
+                self._reset_max_result() 
             return self.__get_feeds_all(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}')
         else:
             return self.__get_feeds(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}') 
@@ -165,6 +177,7 @@ class NewsDataApiClient:
             'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
             'apikey':self.apikey,'qInMeta':qInMeta,'cryptofeeds':cryptofeeds
         }
+        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -173,7 +186,9 @@ class NewsDataApiClient:
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             if max_result:
-                self.max_result = max_result 
+                self.max_result_scroll = max_result
+            else:
+                self._reset_max_result()
             return self.__get_feeds_all(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}')
         else:
             return self.__get_feeds(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}') 
@@ -185,7 +200,7 @@ class NewsDataApiClient:
         """
         URL_parameters = {}
         params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain}
-
+        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -211,7 +226,7 @@ class NewsDataApiClient:
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
             'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin
         }
-
+        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -220,7 +235,9 @@ class NewsDataApiClient:
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             if max_result:
-                self.max_result = max_result 
+                self.max_result_scroll = max_result
+            else:
+                self._reset_max_result()
             return self.__get_feeds_all(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}')
         else:
             return self.__get_feeds(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}') 
