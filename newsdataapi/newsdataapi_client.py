@@ -3,6 +3,7 @@ from newsdataapi import constants
 from typing import Optional,Union
 from datetime import datetime,timezone
 from urllib.parse import urlencode, quote
+from requests.exceptions import RequestException
 from newsdataapi.newsdataapi_exception import NewsdataException
 
 class NewsDataApiClient:
@@ -15,12 +16,10 @@ class NewsDataApiClient:
         self.apikey = apikey
         self.request_method:requests = requests if session == False else requests.Session()
         self.max_result = max_result
-        self.max_result_scroll = max_result
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.proxies = proxies
         self.request_timeout = request_timeout
-        self.recursive_retry = max_retries
         self.is_debug = debug
 
     def set_retries( self, max_retries:int, retry_delay:int)->None:
@@ -31,6 +30,9 @@ class NewsDataApiClient:
     def set_request_timeout( self, request_timeout:int)->None:
         """ API maximum timeout for the request """
         self.request_timeout = request_timeout
+
+    def get_current_dt(self)->str:
+        return datetime.now(tz=timezone.utc).replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
 
     def api_proxies( self, proxies:dict)->None:
         """ Configure Proxie dictionary """
@@ -59,74 +61,90 @@ class NewsDataApiClient:
 
         return {param:value}
     
-    def __get_feeds(self,url:str)-> dict:
+    def __get_feeds(self,url:str,retry_count:int=None)-> dict:
         try:
-            if self.recursive_retry <= 0:
+            if retry_count is None:
+                retry_count = self.max_retries
+
+            if retry_count <= 0:
                 raise  NewsdataException('Maximum retry limit reached. For more information use debug parameter while initializing NewsDataApiClient.')
+            
             response = self.request_method.get(url=url,proxies=self.proxies,timeout=self.request_timeout)
+            
             if self.is_debug == True:
                 headers = response.headers
-                print(f'Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | x_rate_limit_remaining: {headers.get("x_rate_limit_remaining")} | x_api_limit_remaining: {headers.get("x_api_limit_remaining")}')
+                print(f'Debug | {self.get_current_dt()} | x_rate_limit_remaining: {headers.get("x_rate_limit_remaining")} | x_api_limit_remaining: {headers.get("x_api_limit_remaining")}')
+            
             feeds_data:dict = response.json()
+            
             if response.status_code != 200:
+                
                 if response.status_code == 500:
                     if self.is_debug == True:
-                        print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
+                        print(f"Debug | {self.get_current_dt()} | Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
                     time.sleep(self.retry_delay)
-                    self.recursive_retry-=1
-                    return self.__get_feeds(url=url)
+                    return self.__get_feeds(url=url,retry_count=retry_count-1)
+                
                 elif feeds_data.get('results',{}).get('code') == 'TooManyRequests':
                     if self.is_debug == True:
-                        print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'TooManyRequests' going to sleep for: {constants.DEFAULT_RETRY_DELAY_TooManyRequests} seconds.")
+                        print(f"Debug | {self.get_current_dt()} | Encountered 'TooManyRequests' going to sleep for: {constants.DEFAULT_RETRY_DELAY_TooManyRequests} seconds.")
                     time.sleep(constants.DEFAULT_RETRY_DELAY_TooManyRequests)
-                    self.recursive_retry-=1
-                    return self.__get_feeds(url=url)
+                    return self.__get_feeds(url=url,retry_count=retry_count-1)
+                
                 elif feeds_data.get('results',{}).get('code') == 'RateLimitExceeded':
                     if self.is_debug == True:
-                        print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'RateLimitExceeded' going to sleep for: {constants.DEFAULT_RETRY_DELAY_RateLimitExceeded} seconds.")
+                        print(f"Debug | {self.get_current_dt()} | Encountered 'RateLimitExceeded' going to sleep for: {constants.DEFAULT_RETRY_DELAY_RateLimitExceeded} seconds.")
                     time.sleep(constants.DEFAULT_RETRY_DELAY_RateLimitExceeded)
-                    self.recursive_retry-=1
-                    return self.__get_feeds(url=url)
+                    return self.__get_feeds(url=url,retry_count=retry_count-1)
+                
                 else:
                     raise NewsdataException(response.json())
+            
             else:
-                self.recursive_retry = self.max_retries
                 return feeds_data
-        except requests.exceptions.ConnectionError:
+
+        except RequestException:
+            
             if self.is_debug == True:
-                print(f"Debug | {datetime.now(tz=timezone.utc).replace(microsecond=0)} | Encountered 'ConnectionError' going to sleep for: {self.retry_delay} seconds.")
+                print(f"Debug | {self.get_current_dt()} | Encountered 'ConnectionError' going to sleep for: {self.retry_delay} seconds.")
             time.sleep(self.retry_delay)
+            
             if isinstance(self.request_method,requests.Session):
                 self.request_method = requests.Session()
-            self.recursive_retry-=1
-            return self.__get_feeds(url=url)
+            
+            return self.__get_feeds(url=url,retry_count=retry_count-1)
 
-    def __get_feeds_all(self,url:str)-> dict:
-        if not isinstance(self.max_result_scroll,int):
-            raise TypeError('max_result should be of type int.')
+    def __get_feeds_all(self,url:str,max_result:int)-> dict:
         
+        if max_result is None:
+            max_result = self.max_result
+
+        if not isinstance(max_result,int):
+            raise TypeError('max_result should be of type int.')
+                
         if not isinstance(self.request_method,requests.Session):
             self.request_method = requests.Session()
 
         feeds_count = 0
         data = {'totalResults':None,'results':[],'nextPage':True}
         while data.get("nextPage"):
-            response = self.__get_feeds(url=f'{url}&page={data.get("nextPage")}' if data.get('results') else url)
+            try:
+                response = self.__get_feeds(url=f'{url}&page={data.get("nextPage")}' if data.get('results') else url)
+            except NewsdataException as e:
+                if data['totalResults'] is None:
+                    raise e
+                return data
             data['totalResults'] = response.get('totalResults')
             results = response.get('results')
             data['results'].extend(results)
             data['nextPage'] = response.get('nextPage')
             feeds_count+=len(results)
-            if feeds_count >= self.max_result_scroll:
+            if self.is_debug == True:
+                print(f"Debug | {self.get_current_dt()} | total results: {data['totalResults']} | extracted: {feeds_count}")
+            if feeds_count >= max_result:
                 return data
             time.sleep(0.5)
         return data
-
-    def _reset_recursive_retry(self):
-        self.recursive_retry = self.max_retries
-
-    def _reset_max_result(self):
-        self.max_result_scroll = self.max_result
 
     def news_api(
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
@@ -145,7 +163,6 @@ class NewsDataApiClient:
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
             'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region
         }
-        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -153,11 +170,7 @@ class NewsDataApiClient:
 
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            if max_result:
-                self.max_result_scroll = max_result
-            else:
-                self._reset_max_result() 
-            return self.__get_feeds_all(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}')
+            return self.__get_feeds_all(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}',max_result=max_result)
         else:
             return self.__get_feeds(url=f'{constants.NEWS_URL}?{URL_parameters_encoded}') 
 
@@ -177,7 +190,6 @@ class NewsDataApiClient:
             'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
             'apikey':self.apikey,'qInMeta':qInMeta,'cryptofeeds':cryptofeeds
         }
-        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -185,11 +197,7 @@ class NewsDataApiClient:
 
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            if max_result:
-                self.max_result_scroll = max_result
-            else:
-                self._reset_max_result()
-            return self.__get_feeds_all(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}')
+            return self.__get_feeds_all(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}',max_result=max_result)
         else:
             return self.__get_feeds(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}') 
     
@@ -200,7 +208,6 @@ class NewsDataApiClient:
         """
         URL_parameters = {}
         params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain}
-        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -226,7 +233,6 @@ class NewsDataApiClient:
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
             'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin
         }
-        self._reset_recursive_retry()
         URL_parameters = {}
         for key,value in params.items():
             if value is not None:
@@ -234,11 +240,7 @@ class NewsDataApiClient:
 
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            if max_result:
-                self.max_result_scroll = max_result
-            else:
-                self._reset_max_result()
-            return self.__get_feeds_all(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}')
+            return self.__get_feeds_all(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}',max_result=max_result)
         else:
             return self.__get_feeds(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}') 
 
