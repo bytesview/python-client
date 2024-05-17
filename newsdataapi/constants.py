@@ -2,7 +2,7 @@
 BASE_URL = 'https://newsdata.io/api/1/'
 
 # Latest News URL
-NEWS_URL = BASE_URL + 'news'
+LATEST_URL = BASE_URL + 'latest'
 
 # News Archive URL
 ARCHIVE_URL = BASE_URL + 'archive'
