@@ -1,4 +1,5 @@
 import requests,time
+from warnings import warn
 from newsdataapi import constants
 from typing import Optional,Union
 from datetime import datetime,timezone
@@ -159,6 +160,7 @@ class NewsDataApiClient:
         Sending GET request to the news api.
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
+        warn('This method is deprecated and will be removed in upcomming updates, Instead use latest_api()', DeprecationWarning, stacklevel=2)
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
@@ -173,7 +175,35 @@ class NewsDataApiClient:
         if scroll == True:
             return self.__get_feeds_all(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}',max_result=max_result)
         else:
-            return self.__get_feeds(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}') 
+            return self.__get_feeds(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}')
+    
+    def latest_api(
+            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
+            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,
+            domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
+            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
+            max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
+            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None
+        )->dict:
+        """ 
+        Sending GET request to the latest api.
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
+        """
+        params = {
+            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
+            'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
+            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield
+        }
+        URL_parameters = {}
+        for key,value in params.items():
+            if value is not None:
+                URL_parameters.update(self.__validate_parms(param=key,value=value))
+
+        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
+        if scroll == True:
+            return self.__get_feeds_all(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}',max_result=max_result)
+        else:
+            return self.__get_feeds(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}')
 
     def archive_api(
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
