@@ -4,14 +4,16 @@ from newsdataapi import constants
 from typing import Optional,Union
 from datetime import datetime,timezone
 from urllib.parse import urlencode, quote
+from newsdataapi.helpers import FileHandler
 from requests.exceptions import RequestException
 from newsdataapi.newsdataapi_exception import NewsdataException
 
-class NewsDataApiClient:
+class NewsDataApiClient(FileHandler):
 
     def __init__(
             self, apikey:str, session:bool= False, max_retries:int= constants.DEFAULT_MAX_RETRIES, retry_delay:int= constants.DEFAULT_RETRY_DELAY,
-            proxies:Optional[dict]=None, request_timeout:int= constants.DEFAULT_REQUEST_TIMEOUT,max_result:int=10**10, debug:Optional[bool]=False
+            proxies:Optional[dict]=None, request_timeout:int= constants.DEFAULT_REQUEST_TIMEOUT,max_result:int=10**10, debug:Optional[bool]=False,
+            folder_path:str=None
         ):
         """Initializes newsdata client object for access Newsdata APIs."""
         self.apikey = apikey
@@ -22,6 +24,7 @@ class NewsDataApiClient:
         self.proxies = proxies
         self.request_timeout = request_timeout
         self.is_debug = debug
+        super().__init__(folder_path=folder_path)
 
     def set_retries( self, max_retries:int, retry_delay:int)->None:
         """ API maximum retry and delay"""
@@ -160,7 +163,7 @@ class NewsDataApiClient:
         Sending GET request to the news api.
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
-        warn('This method is deprecated and will be removed in upcomming updates, Instead use latest_api()', DeprecationWarning, stacklevel=2)
+        warn('This method is deprecated and will be removed in upcoming updates, Instead use latest_api()', DeprecationWarning, stacklevel=2)
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,

@@ -12,6 +12,11 @@ class test_newsdataapi(unittest.TestCase):
 
         self.assertEqual(response['status'], "success")
 
+    def test_latest_api(self):
+        response = self.api.latest_api()
+
+        self.assertEqual(response['status'], "success")
+
     def test_archive_api(self):
         response = self.api.archive_api(q='test')
 
