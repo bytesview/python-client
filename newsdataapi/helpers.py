@@ -46,9 +46,14 @@ class FileHandler:
         for result in results:
             for k, v in result.items():
                 if isinstance(v, dict):
-                    result[k] = ','.join(f'{i}:{j}' for i, j in v.items())
+                    data = ','.join(f'{i}:{j}' for i, j in v.items())
+                    result[k] = f'"{data}"'
                 elif isinstance(v, list):
-                    result[k] = ','.join(map(str, v))
+                    data = ','.join(map(str, v))
+                    result[k] = f'"{data}"'
+                else:
+                    if v is not None:
+                        result[k] = f'"{v}"'
 
         self.generate_csv_file(results, full_path)
         
