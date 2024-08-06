@@ -43,7 +43,7 @@ class NewsDataApiClient(FileHandler):
         self.proxies = proxies
     
     def __validate_parms(self,param:str,value:Union[list,int,str,bool])->dict:
-        bool_params = {'full_content','image','video','cryptofeeds'}
+        bool_params = {'full_content','image','video','removeduplicate'}
         int_params = {'size'}
         string_params = {
             'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page',
@@ -157,7 +157,7 @@ class NewsDataApiClient(FileHandler):
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
             image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
             max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
-            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None
+            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None
         )->dict:
         """ 
         Sending GET request to the news api.
@@ -167,7 +167,7 @@ class NewsDataApiClient(FileHandler):
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield
+            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate
         }
         URL_parameters = {}
         for key,value in params.items():
@@ -186,7 +186,7 @@ class NewsDataApiClient(FileHandler):
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
             image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
             max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
-            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None
+            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None
         )->dict:
         """ 
         Sending GET request to the latest api.
@@ -195,7 +195,7 @@ class NewsDataApiClient(FileHandler):
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield
+            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate
         }
         URL_parameters = {}
         for key,value in params.items():
@@ -213,7 +213,7 @@ class NewsDataApiClient(FileHandler):
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None,
             excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None,
             video:Optional[bool]=None,prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
-            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None, cryptofeeds:Optional[bool]=None,excludefield:Optional[Union[str,list]]=None
+            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None, excludefield:Optional[Union[str,list]]=None
     ) -> dict:
         """
         Sending GET request to the archive api
@@ -222,7 +222,7 @@ class NewsDataApiClient(FileHandler):
         params = {
             'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,'excludedomain':excludedomain,
             'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
-            'apikey':self.apikey,'qInMeta':qInMeta,'cryptofeeds':cryptofeeds,'excludefield':excludefield
+            'apikey':self.apikey,'qInMeta':qInMeta,'excludefield':excludefield
         }
         URL_parameters = {}
         for key,value in params.items():
@@ -255,7 +255,8 @@ class NewsDataApiClient(FileHandler):
             timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None,
             timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, 
             page:Optional[str]=None, scroll:Optional[bool]=False,max_result:Optional[int]=None, qInMeta:Optional[str]=None,tag:Optional[Union[str,list]]=None, 
-            sentiment:Optional[str]=None,coin:Optional[Union[str, list]]=None,excludefield:Optional[Union[str,list]]=None
+            sentiment:Optional[str]=None,coin:Optional[Union[str, list]]=None,excludefield:Optional[Union[str,list]]=None,from_date:Optional[str]=None, 
+            to_date:Optional[str]=None,removeduplicate:Optional[bool]=None
         )->dict:
         """ 
         Sending GET request to the crypto api
@@ -265,7 +266,8 @@ class NewsDataApiClient(FileHandler):
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
-            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin,'excludefield':excludefield
+            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin,'excludefield':excludefield,
+            'from_date':from_date,'to_date':to_date,'removeduplicate':removeduplicate
         }
         URL_parameters = {}
         for key,value in params.items():
