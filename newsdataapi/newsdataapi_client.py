@@ -3,9 +3,9 @@ from warnings import warn
 from newsdataapi import constants
 from typing import Optional,Union
 from datetime import datetime,timezone
-from urllib.parse import urlencode, quote
 from newsdataapi.helpers import FileHandler
 from requests.exceptions import RequestException
+from urllib.parse import urlencode, quote,urlparse,parse_qs
 from newsdataapi.newsdataapi_exception import NewsdataException
 
 class NewsDataApiClient(FileHandler):
@@ -42,7 +42,7 @@ class NewsDataApiClient(FileHandler):
         """ Configure Proxie dictionary """
         self.proxies = proxies
     
-    def __validate_parms(self,param:str,value:Union[list,int,str,bool])->dict:
+    def __validate_parms(self,user_param:dict)->dict:
         bool_params = {'full_content','image','video','removeduplicate'}
         int_params = {'size'}
         string_params = {
@@ -50,21 +50,53 @@ class NewsDataApiClient(FileHandler):
             'from_date','to_date','apikey','qInMeta','prioritydomain','timeframe','tag','sentiment','region','coin',
             'excludefield'
         }
+        
+        def validate_url(url:str)-> str:
+            valid_fn_parms = {k.lower() for k in user_param.keys()}
+            parsed_url = urlparse(url)
+            if parsed_url.netloc:
+                q_string = parse_qs(parsed_url.query)
+            else:
+                q_string = parse_qs(url)
+            
+            valid_q_string = {}
+            for k,v in q_string.items():
+                k = k.strip().strip('%').strip('?').lower()
+                if k in valid_fn_parms:
+                    valid_q_string[k] = v[0]
+                else:
+                    raise TypeError(f'Provided parameter is invalid: {k}')
+            
+            if not valid_q_string.get('apikey'):
+                valid_q_string['apikey'] = self.apikey
 
-        if param in string_params:
-            if isinstance(value,list):
-                value = ','.join(value)
+            return valid_q_string
+        
+        if user_param.get('raw_query'):
+            value = user_param['raw_query']
             if not isinstance(value,str):
-                raise TypeError(f'{param} should be of type string.')
-        elif param in bool_params:
-            if not isinstance(value,bool):
-                raise TypeError(f'{param} should be of type bool.')
-            value = 1 if value == True else 0
-        elif param in int_params:
-            if not isinstance(value,int):
-                raise TypeError(f'{param} should be of type int.')
+                raise TypeError('raw_query should be of type string.')
+            return validate_url(url=value)
 
-        return {param:value}
+        valid_parms = {}
+        for param,value in user_param.items():
+            if not value:continue
+            if param in string_params:
+                if isinstance(value,list):
+                    value = ','.join(value)
+                if not isinstance(value,str):
+                    raise TypeError(f'{param} should be of type string.')
+            elif param in bool_params:
+                if not isinstance(value,bool):
+                    raise TypeError(f'{param} should be of type bool.')
+                value = 1 if value == True else 0
+            elif param in int_params:
+                if not isinstance(value,int):
+                    raise TypeError(f'{param} should be of type int.')
+            
+            valid_parms[param] = value
+
+        return valid_parms
     
     def __get_feeds(self,url:str,retry_count:int=None)-> dict:
         try:
@@ -157,7 +189,7 @@ class NewsDataApiClient(FileHandler):
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
             image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
             max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
-            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None
+            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None,raw_query:Optional[str]=None
         )->dict:
         """ 
         Sending GET request to the news api.
@@ -167,13 +199,9 @@ class NewsDataApiClient(FileHandler):
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate
+            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate,'raw_query':raw_query
         }
-        URL_parameters = {}
-        for key,value in params.items():
-            if value is not None:
-                URL_parameters.update(self.__validate_parms(param=key,value=value))
-
+        URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             return self.__get_feeds_all(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}',max_result=max_result)
@@ -186,7 +214,7 @@ class NewsDataApiClient(FileHandler):
             domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
             image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
             max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
-            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None
+            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None,raw_query:Optional[str]=None
         )->dict:
         """ 
         Sending GET request to the latest api.
@@ -195,13 +223,9 @@ class NewsDataApiClient(FileHandler):
         params = {
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
             'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate
+            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate,'raw_query':raw_query
         }
-        URL_parameters = {}
-        for key,value in params.items():
-            if value is not None:
-                URL_parameters.update(self.__validate_parms(param=key,value=value))
-
+        URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             return self.__get_feeds_all(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}',max_result=max_result)
@@ -213,7 +237,7 @@ class NewsDataApiClient(FileHandler):
             language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None,
             excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None,
             video:Optional[bool]=None,prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
-            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None, excludefield:Optional[Union[str,list]]=None
+            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None, excludefield:Optional[Union[str,list]]=None,raw_query:Optional[str]=None
     ) -> dict:
         """
         Sending GET request to the archive api
@@ -222,31 +246,22 @@ class NewsDataApiClient(FileHandler):
         params = {
             'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,'excludedomain':excludedomain,
             'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
-            'apikey':self.apikey,'qInMeta':qInMeta,'excludefield':excludefield
+            'apikey':self.apikey,'qInMeta':qInMeta,'excludefield':excludefield,'raw_query':raw_query
         }
-        URL_parameters = {}
-        for key,value in params.items():
-            if value is not None:
-                URL_parameters.update(self.__validate_parms(param=key,value=value))
-
+        URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             return self.__get_feeds_all(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}',max_result=max_result)
         else:
             return self.__get_feeds(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}') 
     
-    def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None, prioritydomain:Optional[str]= None):
+    def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None, prioritydomain:Optional[str]= None,raw_query:Optional[str]=None):
         """ 
         Sending GET request to the sources api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
-        URL_parameters = {}
-        params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain}
-        URL_parameters = {}
-        for key,value in params.items():
-            if value is not None:
-                URL_parameters.update(self.__validate_parms(param=key,value=value))
-
+        params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain,'raw_query':raw_query}
+        URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         return self.__get_feeds(url=f'{constants.SOURCES_URL}?{URL_parameters_encoded}')
 
@@ -256,7 +271,7 @@ class NewsDataApiClient(FileHandler):
             timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, 
             page:Optional[str]=None, scroll:Optional[bool]=False,max_result:Optional[int]=None, qInMeta:Optional[str]=None,tag:Optional[Union[str,list]]=None, 
             sentiment:Optional[str]=None,coin:Optional[Union[str, list]]=None,excludefield:Optional[Union[str,list]]=None,from_date:Optional[str]=None, 
-            to_date:Optional[str]=None,removeduplicate:Optional[bool]=None
+            to_date:Optional[str]=None,removeduplicate:Optional[bool]=None,raw_query:Optional[str]=None,
         )->dict:
         """ 
         Sending GET request to the crypto api
@@ -267,13 +282,9 @@ class NewsDataApiClient(FileHandler):
             'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
             'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
             'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin,'excludefield':excludefield,
-            'from_date':from_date,'to_date':to_date,'removeduplicate':removeduplicate
+            'from_date':from_date,'to_date':to_date,'removeduplicate':removeduplicate,'raw_query':raw_query
         }
-        URL_parameters = {}
-        for key,value in params.items():
-            if value is not None:
-                URL_parameters.update(self.__validate_parms(param=key,value=value))
-
+        URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
             return self.__get_feeds_all(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}',max_result=max_result)
