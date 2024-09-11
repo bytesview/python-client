@@ -2,16 +2,16 @@
 BASE_URL = 'https://newsdata.io/api/1/'
 
 # Latest News URL
-LATEST_URL = BASE_URL + 'latest'
+LATEST_ENDPOINT = 'latest'
 
 # News Archive URL
-ARCHIVE_URL = BASE_URL + 'archive'
+ARCHIVE_ENDPOINT = 'archive'
 
 # News Sources URL
-SOURCES_URL = BASE_URL + 'sources'
+SOURCES_ENDPOINT = 'sources'
 
 # News Crypto URL
-CRYPTO_URL = BASE_URL + 'crypto'
+CRYPTO_ENDPOINT = 'crypto'
 
 # Default request values
 DEFAULT_REQUEST_TIMEOUT = 300
