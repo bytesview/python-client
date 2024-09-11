@@ -5,8 +5,8 @@ from typing import Optional,Union
 from datetime import datetime,timezone
 from newsdataapi.helpers import FileHandler
 from requests.exceptions import RequestException
-from urllib.parse import urlencode, quote,urlparse,parse_qs
 from newsdataapi.newsdataapi_exception import NewsdataException
+from urllib.parse import urlencode, quote,urlparse,parse_qs,urljoin
 
 class NewsDataApiClient(FileHandler):
 
@@ -24,7 +24,14 @@ class NewsDataApiClient(FileHandler):
         self.proxies = proxies
         self.request_timeout = request_timeout
         self.is_debug = debug
+        self.set_base_url()
         super().__init__(folder_path=folder_path)
+    
+    def set_base_url(self,new_base_url:str=constants.BASE_URL)->None:
+        self.latest_url = urljoin(new_base_url,constants.LATEST_ENDPOINT)
+        self.archive_url = urljoin(new_base_url,constants.ARCHIVE_ENDPOINT)
+        self.crypto_url = urljoin(new_base_url,constants.CRYPTO_ENDPOINT)
+        self.sources_url = urljoin(new_base_url,constants.SOURCES_ENDPOINT)
 
     def set_retries( self, max_retries:int, retry_delay:int)->None:
         """ API maximum retry and delay"""
@@ -204,9 +211,9 @@ class NewsDataApiClient(FileHandler):
         URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            return self.__get_feeds_all(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}',max_result=max_result)
+            return self.__get_feeds_all(url=f'{self.latest_url}?{URL_parameters_encoded}',max_result=max_result)
         else:
-            return self.__get_feeds(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}')
+            return self.__get_feeds(url=f'{self.latest_url}?{URL_parameters_encoded}')
     
     def latest_api(
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
@@ -228,9 +235,9 @@ class NewsDataApiClient(FileHandler):
         URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            return self.__get_feeds_all(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}',max_result=max_result)
+            return self.__get_feeds_all(url=f'{self.latest_url}?{URL_parameters_encoded}',max_result=max_result)
         else:
-            return self.__get_feeds(url=f'{constants.LATEST_URL}?{URL_parameters_encoded}')
+            return self.__get_feeds(url=f'{self.latest_url}?{URL_parameters_encoded}')
 
     def archive_api(
             self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
@@ -251,9 +258,9 @@ class NewsDataApiClient(FileHandler):
         URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            return self.__get_feeds_all(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}',max_result=max_result)
+            return self.__get_feeds_all(url=f'{self.archive_url}?{URL_parameters_encoded}',max_result=max_result)
         else:
-            return self.__get_feeds(url=f'{constants.ARCHIVE_URL}?{URL_parameters_encoded}') 
+            return self.__get_feeds(url=f'{self.archive_url}?{URL_parameters_encoded}') 
     
     def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None, prioritydomain:Optional[str]= None,raw_query:Optional[str]=None):
         """ 
@@ -263,7 +270,7 @@ class NewsDataApiClient(FileHandler):
         params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain,'raw_query':raw_query}
         URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        return self.__get_feeds(url=f'{constants.SOURCES_URL}?{URL_parameters_encoded}')
+        return self.__get_feeds(url=f'{self.sources_url}?{URL_parameters_encoded}')
 
     def crypto_api(
             self, q:Optional[str]=None, qInTitle:Optional[str]=None,language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None,
@@ -287,9 +294,9 @@ class NewsDataApiClient(FileHandler):
         URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll == True:
-            return self.__get_feeds_all(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}',max_result=max_result)
+            return self.__get_feeds_all(url=f'{self.crypto_url}?{URL_parameters_encoded}',max_result=max_result)
         else:
-            return self.__get_feeds(url=f'{constants.CRYPTO_URL}?{URL_parameters_encoded}') 
+            return self.__get_feeds(url=f'{self.crypto_url}?{URL_parameters_encoded}') 
 
     def __del__(self):
         if isinstance(self.request_method,requests.Session):
