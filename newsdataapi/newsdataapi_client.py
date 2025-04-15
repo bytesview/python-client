@@ -13,7 +13,7 @@ class NewsDataApiClient(FileHandler):
     def __init__(
             self, apikey:str, session:bool= False, max_retries:int= constants.DEFAULT_MAX_RETRIES, retry_delay:int= constants.DEFAULT_RETRY_DELAY,
             proxies:Optional[dict]=None, request_timeout:int= constants.DEFAULT_REQUEST_TIMEOUT,max_result:int=10**10, debug:Optional[bool]=False,
-            folder_path:str=None
+            folder_path:str=None,include_headers:bool=False
         ):
         """Initializes newsdata client object for access Newsdata APIs."""
         self.apikey = apikey
@@ -24,6 +24,7 @@ class NewsDataApiClient(FileHandler):
         self.proxies = proxies
         self.request_timeout = request_timeout
         self.is_debug = debug
+        self.include_headers = include_headers
         self.set_base_url()
         super().__init__(folder_path=folder_path)
     
@@ -114,13 +115,15 @@ class NewsDataApiClient(FileHandler):
                 raise  NewsdataException('Maximum retry limit reached. For more information use debug parameter while initializing NewsDataApiClient.')
             
             response = self.request_method.get(url=url,proxies=self.proxies,timeout=self.request_timeout)
+            headers = dict(response.headers)
             
             if self.is_debug == True:
-                headers = response.headers
                 print(f'Debug | {self.get_current_dt()} | x_rate_limit_remaining: {headers.get("x_rate_limit_remaining")} | x_api_limit_remaining: {headers.get("x_api_limit_remaining")}')
             
             feeds_data:dict = response.json()
-            
+            if self.include_headers == True:
+                feeds_data.update({'response_headers':headers})
+
             if response.status_code != 200:
                 
                 if response.status_code == 500:
@@ -182,6 +185,8 @@ class NewsDataApiClient(FileHandler):
             results = response.get('results')
             data['results'].extend(results)
             data['nextPage'] = response.get('nextPage')
+            if self.include_headers:
+                data['response_headers'] = response.get('response_headers')
             feeds_count+=len(results)
             if self.is_debug == True:
                 print(f"Debug | {self.get_current_dt()} | total results: {data['totalResults']} | extracted: {feeds_count}")
