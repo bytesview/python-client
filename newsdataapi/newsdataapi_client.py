@@ -33,6 +33,7 @@ class NewsDataApiClient(FileHandler):
         self.archive_url = urljoin(new_base_url,constants.ARCHIVE_ENDPOINT)
         self.crypto_url = urljoin(new_base_url,constants.CRYPTO_ENDPOINT)
         self.sources_url = urljoin(new_base_url,constants.SOURCES_ENDPOINT)
+        self.count_url = urljoin(new_base_url,constants.COUNT_ENDPOINT)
 
     def set_retries( self, max_retries:int, retry_delay:int)->None:
         """ API maximum retry and delay"""
@@ -302,6 +303,23 @@ class NewsDataApiClient(FileHandler):
             return self.__get_feeds_all(url=f'{self.crypto_url}?{URL_parameters_encoded}',max_result=max_result)
         else:
             return self.__get_feeds(url=f'{self.crypto_url}?{URL_parameters_encoded}') 
+
+    def count_api(
+        self, q:Optional[str]=None, qInTitle:Optional[str]=None, qInMeta:Optional[str]=None, country:Optional[Union[str, list]]=None,
+        category:Optional[Union[str, list]]=None,language:Optional[Union[str, list]]=None, from_date:Optional[str]=None,
+        to_date:Optional[str]=None,raw_query:Optional[str]=None
+    ) -> dict:
+        """
+        Sending GET request to the count api
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
+        """
+        params = {
+            'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'from_date':from_date,'to_date':to_date,
+            'apikey':self.apikey,'qInMeta':qInMeta,'raw_query':raw_query
+        }
+        URL_parameters = self.__validate_parms(user_param=params)
+        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
+        return self.__get_feeds(url=f'{self.count_url}?{URL_parameters_encoded}') 
 
     def __del__(self):
         if isinstance(self.request_method,requests.Session):

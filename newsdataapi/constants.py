@@ -13,6 +13,8 @@ SOURCES_ENDPOINT = 'sources'
 # News Crypto URL
 CRYPTO_ENDPOINT = 'crypto'
 
+COUNT_ENDPOINT = 'count'
+
 # Default request values
 DEFAULT_REQUEST_TIMEOUT = 300
 DEFAULT_MAX_RETRIES = 5

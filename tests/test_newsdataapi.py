@@ -31,3 +31,8 @@ class test_newsdataapi(unittest.TestCase):
         response = self.api.crypto_api()
 
         self.assertEqual(response['status'], "success")
+
+    def test_count_api(self):
+        response = self.api.count_api(language='en')
+
+        self.assertEqual(response['status'], "success")
