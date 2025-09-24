@@ -15,6 +15,8 @@ CRYPTO_ENDPOINT = 'crypto'
 
 COUNT_ENDPOINT = 'count'
 
+CRYPTO_COUNT_ENDPOINT = 'crypto/count'
+
 # Default request values
 DEFAULT_REQUEST_TIMEOUT = 300
 DEFAULT_MAX_RETRIES = 5
