@@ -32,7 +32,10 @@ class test_newsdataapi(unittest.TestCase):
 
         self.assertEqual(response['status'], "success")
 
-    # def test_count_api(self):
-    #     response = self.api.count_api(language='en')
+    def test_count_api(self):
+        response = self.api.count_api(language='en')
+        self.assertEqual(response['status'], "success")
 
-    #     self.assertEqual(response['status'], "success")
+    def test_crypto_count_api(self):
+        response = self.api.crypto_count_api(q='bitcoin',language='en')
+        self.assertEqual(response['status'], "success")
