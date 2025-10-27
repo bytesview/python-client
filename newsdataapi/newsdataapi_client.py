@@ -1,5 +1,6 @@
-import requests,time
 from warnings import warn
+import requests,time,logging
+from typing import Dict, Any, List
 from newsdataapi import constants
 from typing import Optional,Union
 from datetime import datetime,timezone
@@ -8,13 +9,23 @@ from requests.exceptions import RequestException
 from newsdataapi.newsdataapi_exception import NewsdataException
 from urllib.parse import urlencode, quote,urlparse,parse_qs,urljoin
 
+logger = logging.getLogger(__name__)
+
 class NewsDataApiClient(FileHandler):
 
     def __init__(
-            self, apikey:str, session:bool= False, max_retries:int= constants.DEFAULT_MAX_RETRIES, retry_delay:int= constants.DEFAULT_RETRY_DELAY,
-            proxies:Optional[dict]=None, request_timeout:int= constants.DEFAULT_REQUEST_TIMEOUT,max_result:int=10**10, debug:Optional[bool]=False,
-            folder_path:str=None,include_headers:bool=False
-        ):
+            self, 
+            apikey: str, 
+            session: Optional[bool] = False, 
+            proxies: Optional[Dict[str, Any]] = None, 
+            max_retries: Optional[int] = constants.DEFAULT_MAX_RETRIES, 
+            retry_delay: Optional[int] = constants.DEFAULT_RETRY_DELAY,
+            request_timeout: Optional[int] = constants.DEFAULT_REQUEST_TIMEOUT, 
+            max_result: Optional[int] = 10**10, 
+            debug: Optional[bool] = False,
+            folder_path: Optional[str] = None, 
+            include_headers: Optional[bool] = False
+        ) -> None:
         """Initializes newsdata client object for access Newsdata APIs."""
         self.apikey = apikey
         self.request_method:requests = requests if session == False else requests.Session()
@@ -23,18 +34,19 @@ class NewsDataApiClient(FileHandler):
         self.retry_delay = retry_delay
         self.proxies = proxies
         self.request_timeout = request_timeout
-        self.is_debug = debug
+        # self.is_debug = debug
         self.include_headers = include_headers
         self.set_base_url()
         super().__init__(folder_path=folder_path)
     
-    def set_base_url(self,new_base_url:str=constants.BASE_URL)->None:
+    def set_base_url(self,new_base_url:Optional[str]=constants.BASE_URL)->None:
         self.latest_url = urljoin(new_base_url,constants.LATEST_ENDPOINT)
         self.archive_url = urljoin(new_base_url,constants.ARCHIVE_ENDPOINT)
         self.crypto_url = urljoin(new_base_url,constants.CRYPTO_ENDPOINT)
         self.sources_url = urljoin(new_base_url,constants.SOURCES_ENDPOINT)
         self.count_url = urljoin(new_base_url,constants.COUNT_ENDPOINT)
         self.crypto_count_url = urljoin(new_base_url,constants.CRYPTO_COUNT_ENDPOINT)
+        self.market_url = urljoin(new_base_url,constants.MARKET_ENDPOINT)
 
     def set_retries( self, max_retries:int, retry_delay:int)->None:
         """ API maximum retry and delay"""
@@ -52,13 +64,13 @@ class NewsDataApiClient(FileHandler):
         """ Configure Proxie dictionary """
         self.proxies = proxies
     
-    def __validate_parms(self,user_param:dict)->dict:
+    def __validate_parms(self, user_param: Dict[str, Any]) -> Dict[str, Any]:
         bool_params = {'full_content','image','video','removeduplicate'}
         int_params = {'size'}
         string_params = {
             'q','qInTitle','country','category','language','domain','domainurl','excludedomain','timezone','page',
-            'from_date','to_date','apikey','qInMeta','prioritydomain','timeframe','tag','sentiment','region','coin',
-            'excludefield','excludecategory','id'
+            'from_date','to_date','qInMeta','prioritydomain','timeframe','tag','sentiment','region','coin',
+            'excludefield','excludecategory','id','excludelanguage','organization','url','sort','symbol','webhook',
         }
         
         def validate_url(url:str)-> str:
@@ -77,9 +89,6 @@ class NewsDataApiClient(FileHandler):
                 else:
                     raise TypeError(f'Provided parameter is invalid: {k}')
             
-            if not valid_q_string.get('apikey'):
-                valid_q_string['apikey'] = self.apikey
-
             return valid_q_string
         
         if user_param.get('raw_query'):
@@ -108,238 +117,572 @@ class NewsDataApiClient(FileHandler):
 
         return valid_parms
     
-    def __get_feeds(self,url:str,retry_count:int=None)-> dict:
+    def __get_feeds(self, endpoint:str, query_params:dict, retry_count: Optional[int] = None) -> Dict[str, Any]:
         try:
             if retry_count is None:
-                retry_count = self.max_retries
+                retry_count = 0
 
-            if retry_count <= 0:
-                raise  NewsdataException('Maximum retry limit reached. For more information use debug parameter while initializing NewsDataApiClient.')
+            if retry_count >= self.max_retries:
+                raise  NewsdataException(f'Maximum retry limit reached : {self.max_retries}.')
             
+            s_time = time.perf_counter()
+            query_params.update({'apikey':self.apikey})
+            url = f'{endpoint}?{urlencode(query_params,quote_via=quote)}'
+            
+            logger.info(f"Fetching data from URL: {url}")
             response = self.request_method.get(url=url,proxies=self.proxies,timeout=self.request_timeout)
-            headers = dict(response.headers)
-            
-            if self.is_debug == True:
-                print(f'Debug | {self.get_current_dt()} | x_rate_limit_remaining: {headers.get("x_rate_limit_remaining")} | x_api_limit_remaining: {headers.get("x_api_limit_remaining")}')
+            logger.info(f"Time taken to fetch data: {time.perf_counter() - s_time}")
+
+            X_API_Limit_Remaining = response.headers.get("X-API-Limit-Remaining")
+            X_RateLimit_Remaining = response.headers.get("X-RateLimit-Remaining")
+            logger.info(f'X-API-Limit-Remaining: {X_API_Limit_Remaining}, X-RateLimit-Remaining: {X_RateLimit_Remaining}')
             
             feeds_data:dict = response.json()
             if self.include_headers == True:
-                feeds_data.update({'response_headers':headers})
+                feeds_data.update({'response_headers':dict(response.headers)})
 
-            if response.status_code != 200:
-                
-                if response.status_code == 500:
-                    if self.is_debug == True:
-                        print(f"Debug | {self.get_current_dt()} | Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
-                    time.sleep(self.retry_delay)
-                    return self.__get_feeds(url=url,retry_count=retry_count-1)
-                
-                elif feeds_data.get('results',{}).get('code') == 'TooManyRequests':
-                    if self.is_debug == True:
-                        print(f"Debug | {self.get_current_dt()} | Encountered 'TooManyRequests' going to sleep for: {constants.DEFAULT_RETRY_DELAY_TooManyRequests} seconds.")
-                    time.sleep(constants.DEFAULT_RETRY_DELAY_TooManyRequests)
-                    return self.__get_feeds(url=url,retry_count=retry_count-1)
-                
-                elif feeds_data.get('results',{}).get('code') == 'RateLimitExceeded':
-                    if self.is_debug == True:
-                        print(f"Debug | {self.get_current_dt()} | Encountered 'RateLimitExceeded' going to sleep for: {constants.DEFAULT_RETRY_DELAY_RateLimitExceeded} seconds.")
-                    time.sleep(constants.DEFAULT_RETRY_DELAY_RateLimitExceeded)
-                    return self.__get_feeds(url=url,retry_count=retry_count-1)
-                
-                else:
-                    raise NewsdataException(response.json())
-            
-            else:
+            if response.status_code == 200 and feeds_data.get('status') == 'success':
                 return feeds_data
 
-        except RequestException:
+            if response.status_code == 500:
+                logger.error(f"Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
+                time.sleep(self.retry_delay)
+                retry_count += 1
+                return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
+
+            elif response.status_code == 429:
+                Retry_After = int(response.headers.get("Retry-After",self.retry_delay))
+                
+                if feeds_data.get('results',{}).get('code') == 'TooManyRequests':
+                    logger.error(f"Encountered 'TooManyRequests' going to sleep for: {Retry_After} seconds.")
+                    time.sleep(Retry_After)
+                    retry_count += 1
+                    return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
             
-            if self.is_debug == True:
-                print(f"Debug | {self.get_current_dt()} | Encountered 'ConnectionError' going to sleep for: {self.retry_delay} seconds.")
+                elif feeds_data.get('results',{}).get('code') == 'RateLimitExceeded':
+                    logger.error(f"Encountered 'RateLimitExceeded' going to sleep for: {Retry_After} seconds.")
+                    time.sleep(Retry_After)
+                    retry_count += 1
+                    return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
+            else:
+                raise NewsdataException(response.json())
+
+        except RequestException as e:
+            logger.error(f"Encountered 'ConnectionError' going to sleep for: {self.retry_delay} seconds. Reason: {e}")
             time.sleep(self.retry_delay)
             
             if isinstance(self.request_method,requests.Session):
+                if self.request_method:
+                    self.request_method.close()
+
                 self.request_method = requests.Session()
             
-            return self.__get_feeds(url=url,retry_count=retry_count-1)
+            retry_count += 1
+            logger.info(f"Retrying request for: {url}, Retry count: {retry_count}")
+            return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
 
-    def __get_feeds_all(self,url:str,max_result:int)-> dict:
-        
+    def __get_feeds_all(self, endpoint:str,query_params:dict, max_result: Optional[int] = None) -> Dict[str, Any]:
+
         if max_result is None:
             max_result = self.max_result
+        
+        self.request_method = requests.Session()
 
-        if not isinstance(max_result,int):
-            raise TypeError('max_result should be of type int.')
-                
-        if not isinstance(self.request_method,requests.Session):
-            self.request_method = requests.Session()
-
-        feeds_count = 0
-        data = {'totalResults':None,'results':[],'nextPage':True}
-        while data.get("nextPage"):
-            try:
-                response = self.__get_feeds(url=f'{url}&page={data.get("nextPage")}' if data.get('results') else url)
-            except NewsdataException as e:
-                if data['totalResults'] is None:
-                    raise e
-                return data
+        data = {'totalResults':None,'results':[],'nextPage':None}
+        while True:
+            response:dict = self.__get_feeds(endpoint=endpoint,query_params=query_params)
             data['totalResults'] = response.get('totalResults')
-            results = response.get('results')
-            data['results'].extend(results)
+            data['results'].extend(response.get('results',[]))
             data['nextPage'] = response.get('nextPage')
+
+            query_params['page'] = data['nextPage']
+                
             if self.include_headers:
                 data['response_headers'] = response.get('response_headers')
-            feeds_count+=len(results)
-            if self.is_debug == True:
-                print(f"Debug | {self.get_current_dt()} | total results: {data['totalResults']} | extracted: {feeds_count}")
-            if feeds_count >= max_result:
+        
+            logger.info(f"Total results: {data['totalResults']} | Extracted: {len(data['results'])}")
+            
+            if not data['nextPage']:
                 return data
-            time.sleep(0.5)
-        return data
+            
+            if max_result and len(data['results']) >= max_result:
+                return data
+
+            time.sleep(constants.PAGINATION_SLEEP)
 
     def news_api(
-            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
-            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,
-            domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
-            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
-            max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
-            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None,raw_query:Optional[str]=None
+            self, 
+            q:Optional[str]=None, 
+            qInTitle:Optional[str]=None, 
+            country:Optional[Union[str, List[str]]]=None, 
+            category:Optional[Union[str, List[str]]]=None,
+            language:Optional[Union[str, List[str]]]=None, 
+            domain:Optional[Union[str, List[str]]]=None, 
+            timeframe:Optional[Union[int, str]]=None, 
+            size:Optional[int]=None,
+            domainurl:Optional[Union[str, List[str]]]=None, 
+            excludedomain:Optional[Union[str, List[str]]]=None, 
+            timezone:Optional[str]=None, 
+            full_content:Optional[bool]=None,
+            image:Optional[bool]=None, 
+            video:Optional[bool]=None, 
+            prioritydomain:Optional[str]=None, 
+            page:Optional[str]=None, 
+            scroll:Optional[bool]=False,
+            max_result:Optional[int]=None, 
+            qInMeta:Optional[str]=None, 
+            tag:Optional[Union[str, List[str]]]=None, 
+            sentiment:Optional[str]=None,
+            region:Optional[Union[str, List[str]]]=None,
+            excludefield:Optional[Union[str, List[str]]]=None,
+            removeduplicate:Optional[bool]=None,
+            raw_query:Optional[str]=None
         )->dict:
-        """ 
+        """
         Sending GET request to the news api.
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         warn('This method is deprecated and will be removed in upcoming updates, Instead use latest_api()', DeprecationWarning, stacklevel=2)
         params = {
-            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
-            'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate,'raw_query':raw_query
+            'q':q,
+            'qInTitle':qInTitle,
+            'country':country,
+            'category':category,
+            'language':language,
+            'domain':domain,
+            'timeframe':str(timeframe) if timeframe else timeframe,
+            'size':size,
+            'domainurl':domainurl,
+            'excludedomain':excludedomain,
+            'timezone':timezone,
+            'full_content':full_content,
+            'image':image,
+            'video':video,
+            'prioritydomain':prioritydomain,
+            'page':page,
+            'qInMeta':qInMeta,
+            'tag':tag, 
+            'sentiment':sentiment, 
+            'region':region,
+            'excludefield':excludefield,
+            'removeduplicate':removeduplicate,
+            'raw_query':raw_query
         }
         URL_parameters = self.__validate_parms(user_param=params)
         URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        if scroll == True:
+        if scroll:
             return self.__get_feeds_all(url=f'{self.latest_url}?{URL_parameters_encoded}',max_result=max_result)
         else:
             return self.__get_feeds(url=f'{self.latest_url}?{URL_parameters_encoded}')
     
     def latest_api(
-            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
-            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,
-            domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,
-            image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False,
-            max_result:Optional[int]=None, qInMeta:Optional[str]=None, tag:Optional[Union[str,list]]=None, sentiment:Optional[str]=None,
-            region:Optional[Union[str,list]]=None,excludefield:Optional[Union[str,list]]=None,removeduplicate:Optional[bool]=None,raw_query:Optional[str]=None,
-            excludecategory:Optional[Union[str,list]]=None,id:Optional[str]=None
-        )->dict:
+            self, 
+            q: Optional[str] = None, 
+            qInTitle: Optional[str] = None, 
+            qInMeta: Optional[str] = None, 
+            country: Optional[Union[str, List[str]]] = None, 
+            category: Optional[Union[str, List[str]]] = None,
+            language: Optional[Union[str, List[str]]] = None, 
+            domain: Optional[Union[str, List[str]]] = None, 
+            domainurl: Optional[Union[str, List[str]]] = None, 
+            prioritydomain: Optional[str] = None, 
+            excludedomain: Optional[Union[str, List[str]]] = None, 
+            timeframe: Optional[Union[int, str]] = None, 
+            size: Optional[int] = None,
+            timezone: Optional[str] = None, 
+            full_content: Optional[bool] = None,
+            image: Optional[bool] = None, 
+            video: Optional[bool] = None, 
+            page: Optional[str] = None, 
+            tag: Optional[Union[str, List[str]]] = None, 
+            sentiment: Optional[str] = None,
+            region: Optional[Union[str, List[str]]] = None, 
+            excludefield: Optional[Union[str, List[str]]] = None, 
+            removeduplicate: Optional[bool] = None, 
+            excludecategory: Optional[Union[str, List[str]]] = None, 
+            id: Optional[str] = None, 
+            excludelanguage: Optional[Union[str, List[str]]] = None,
+            organization: Optional[str] = None, 
+            url: Optional[str] = None, 
+            sort: Optional[str] = None,
+
+            raw_query: Optional[str] = None,
+            max_result: Optional[int] = None, 
+            scroll: Optional[bool] = False,
+            paginate: Optional[bool] = False,
+        ) -> Dict[str, Any]:
         """ 
-        Sending GET request to the latest api.
-        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
+            Sending GET request to the latest api.
+            For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         params = {
-            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'timeframe':str(timeframe) if timeframe else timeframe,
-            'size':size,'domainurl':domainurl,'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,
-            'page':page,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment, 'region':region,'excludefield':excludefield,'removeduplicate':removeduplicate,'raw_query':raw_query,
-            'excludecategory':excludecategory,'id':id
+            'q':q,
+            'qInTitle':qInTitle,
+            'country':country,
+            'category':category,
+            'language':language,
+            'domain':domain,
+            'timeframe':str(timeframe) if timeframe else timeframe,
+            'size':size,
+            'domainurl':domainurl,
+            'excludedomain':excludedomain,
+            'timezone':timezone,
+            'full_content':full_content,
+            'image':image,
+            'video':video,
+            'prioritydomain':prioritydomain,
+            'page':page,
+            'qInMeta':qInMeta,
+            'tag':tag, 
+            'sentiment':sentiment, 
+            'region':region,
+            'excludefield':excludefield,
+            'removeduplicate':removeduplicate,
+            'raw_query':raw_query,
+            'excludecategory':excludecategory,
+            'id':id, 
+            'excludelanguage':excludelanguage, 
+            'organization':organization, 
+            'url':url, 
+            'sort':sort
         }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        if scroll == True:
-            return self.__get_feeds_all(url=f'{self.latest_url}?{URL_parameters_encoded}',max_result=max_result)
+        if scroll:
+            return self.__get_feeds_all(endpoint=self.latest_url,query_params=URL_parameters,max_result=max_result)
+        elif paginate:
+            return self.__paginate_results(endpoint=self.latest_url,query_params=URL_parameters)
         else:
-            return self.__get_feeds(url=f'{self.latest_url}?{URL_parameters_encoded}')
+            return self.__get_feeds(endpoint=self.latest_url,query_params=URL_parameters)
 
     def archive_api(
-            self, q:Optional[str]=None, qInTitle:Optional[str]=None, country:Optional[Union[str, list]]=None, category:Optional[Union[str, list]]=None,
-            language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None,
-            excludedomain:Optional[Union[str, list]]=None, timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None,
-            video:Optional[bool]=None,prioritydomain:Optional[str]=None, page:Optional[str]=None, scroll:Optional[bool]=False, max_result:Optional[int]=None,
-            from_date:Optional[str]=None, to_date:Optional[str]=None, qInMeta:Optional[str]=None, excludefield:Optional[Union[str,list]]=None,raw_query:Optional[str]=None,
-            excludecategory:Optional[Union[str,list]]=None,id:Optional[str]=None
-    ) -> dict:
+            self, 
+            q: Optional[str] = None, 
+            qInTitle: Optional[str] = None, 
+            country: Optional[Union[str, List[str]]] = None, 
+            category: Optional[Union[str, List[str]]] = None,
+            language: Optional[Union[str, List[str]]] = None, 
+            domain: Optional[Union[str, List[str]]] = None, 
+            size: Optional[int] = None, 
+            domainurl: Optional[Union[str, List[str]]] = None,
+            excludedomain: Optional[Union[str, List[str]]] = None, 
+            timezone: Optional[str] = None, 
+            full_content: Optional[bool] = None, 
+            image: Optional[bool] = None,
+            video: Optional[bool] = None, 
+            prioritydomain: Optional[str] = None, 
+            page: Optional[str] = None, 
+            from_date: Optional[str] = None, 
+            to_date: Optional[str] = None, 
+            qInMeta: Optional[str] = None, 
+            excludefield: Optional[Union[str, List[str]]] = None, 
+            excludecategory: Optional[Union[str, List[str]]] = None, 
+            id: Optional[str] = None, 
+            excludelanguage: Optional[Union[str, List[str]]] = None,
+            url: Optional[str] = None, 
+            sort: Optional[str] = None,
+
+            paginate: Optional[bool] = False,
+            raw_query: Optional[str] = None,
+            scroll: Optional[bool] = False, 
+            max_result: Optional[int] = None,
+        ) -> Dict[str, Any]:
         """
         Sending GET request to the archive api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         params = {
-            'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'domain':domain,'size':size,'domainurl':domainurl,'excludedomain':excludedomain,
-            'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,'from_date':from_date,'to_date':to_date,
-            'apikey':self.apikey,'qInMeta':qInMeta,'excludefield':excludefield,'raw_query':raw_query,'excludecategory':excludecategory,'id':id
+            'q':q,
+            'qInTitle':qInTitle,
+            'country':country,
+            'category':category,
+            'language':language,
+            'domain':domain,
+            'size':size,
+            'domainurl':domainurl,
+            'excludedomain':excludedomain,
+            'timezone':timezone,
+            'full_content':full_content,
+            'image':image,
+            'video':video,
+            'prioritydomain':prioritydomain,
+            'page':page,
+            'from_date':from_date,
+            'to_date':to_date,
+            'qInMeta':qInMeta,
+            'excludefield':excludefield,
+            'raw_query':raw_query,
+            'excludecategory':excludecategory,
+            'id':id,
+            'excludelanguage':excludelanguage, 
+            'url':url, 
+            'sort':sort
         }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        if scroll == True:
-            return self.__get_feeds_all(url=f'{self.archive_url}?{URL_parameters_encoded}',max_result=max_result)
+        if scroll:
+            return self.__get_feeds_all(endpoint=self.archive_url,query_params=URL_parameters,max_result=max_result)
+        elif paginate:
+            return self.__paginate_results(endpoint=self.archive_url,query_params=URL_parameters)
         else:
-            return self.__get_feeds(url=f'{self.archive_url}?{URL_parameters_encoded}') 
+            return self.__get_feeds(endpoint=self.archive_url,query_params=URL_parameters)
     
-    def sources_api( self, country:Optional[str]= None, category:Optional[str]= None, language:Optional[str]= None, prioritydomain:Optional[str]= None,raw_query:Optional[str]=None):
+    def sources_api(
+            self, 
+            country:  Optional[Union[str, List[str]]]= None, 
+            category: Optional[Union[str, List[str]]] = None, 
+            language: Optional[Union[str, List[str]]] = None, 
+            prioritydomain: Optional[str] = None,
+            domainurl: Optional[Union[str, List[str]]] = None,
+
+            raw_query: Optional[str] = None
+        ) -> Dict[str, Any]:
         """ 
         Sending GET request to the sources api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
-        params = {"apikey":self.apikey, "country":country, "category":category, "language":language, "prioritydomain":prioritydomain,'raw_query':raw_query}
+        params = {
+            'country':country,
+            'category':category,
+            'language':language,
+            'prioritydomain':prioritydomain,
+            'domainurl':domainurl,
+            'raw_query':raw_query
+        }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        return self.__get_feeds(url=f'{self.sources_url}?{URL_parameters_encoded}')
+        return self.__get_feeds(endpoint=self.sources_url,query_params=URL_parameters)
 
     def crypto_api(
-            self, q:Optional[str]=None, qInTitle:Optional[str]=None,language:Optional[Union[str, list]]=None, domain:Optional[Union[str, list]]=None,
-            timeframe:Optional[Union[int,str]]=None, size:Optional[int]=None,domainurl:Optional[Union[str, list]]=None, excludedomain:Optional[Union[str, list]]=None,
-            timezone:Optional[str]=None, full_content:Optional[bool]=None,image:Optional[bool]=None, video:Optional[bool]=None, prioritydomain:Optional[str]=None, 
-            page:Optional[str]=None, scroll:Optional[bool]=False,max_result:Optional[int]=None, qInMeta:Optional[str]=None,tag:Optional[Union[str,list]]=None, 
-            sentiment:Optional[str]=None,coin:Optional[Union[str, list]]=None,excludefield:Optional[Union[str,list]]=None,from_date:Optional[str]=None, 
-            to_date:Optional[str]=None,removeduplicate:Optional[bool]=None,raw_query:Optional[str]=None,id:Optional[str]=None,
-        )->dict:
+            self, 
+            q: Optional[str] = None, 
+            qInTitle: Optional[str] = None, 
+            language: Optional[Union[str, List[str]]] = None, 
+            domain: Optional[Union[str, List[str]]] = None,
+            timeframe: Optional[Union[int, str]] = None, 
+            size: Optional[int] = None, 
+            domainurl: Optional[Union[str, List[str]]] = None, 
+            excludedomain: Optional[Union[str, List[str]]] = None,
+            timezone: Optional[str] = None, 
+            full_content: Optional[bool] = None, 
+            image: Optional[bool] = None, 
+            video: Optional[bool] = None, 
+            prioritydomain: Optional[str] = None, 
+            page: Optional[str] = None, 
+            qInMeta: Optional[str] = None, 
+            tag: Optional[Union[str, List[str]]] = None, 
+            sentiment: Optional[str] = None, 
+            coin: Optional[Union[str, List[str]]] = None,
+            excludefield: Optional[Union[str, List[str]]] = None, 
+            from_date: Optional[str] = None, 
+            to_date: Optional[str] = None,
+            removeduplicate: Optional[bool] = None, 
+            raw_query: Optional[str] = None, 
+            id: Optional[str] = None,
+            excludelanguage: Optional[Union[str, List[str]]] = None, 
+            url: Optional[str] = None, 
+            sort: Optional[str] = None,
+
+            paginate: Optional[bool] = False,
+            scroll: Optional[bool] = False, 
+            max_result: Optional[int] = None, 
+        ) -> Dict[str, Any]:
         """ 
         Sending GET request to the crypto api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
 
         params = {
-            'apikey':self.apikey,'q':q,'qInTitle':qInTitle,'language':language,'domain':domain,'size':size,'domainurl':domainurl,
-            'excludedomain':excludedomain,'timezone':timezone,'full_content':full_content,'image':image,'video':video,'prioritydomain':prioritydomain,'page':page,
-            'timeframe':str(timeframe) if timeframe else timeframe,'qInMeta':qInMeta,'tag':tag, 'sentiment':sentiment,'coin':coin,'excludefield':excludefield,
-            'from_date':from_date,'to_date':to_date,'removeduplicate':removeduplicate,'raw_query':raw_query,'id':id
+            'q':q,
+            'qInTitle':qInTitle,
+            'language':language,
+            'domain':domain,
+            'size':size,
+            'domainurl':domainurl,
+            'excludedomain':excludedomain,
+            'timezone':timezone,
+            'full_content':full_content,
+            'image':image,
+            'video':video,
+            'prioritydomain':prioritydomain,
+            'page':page,
+            'timeframe':str(timeframe) if timeframe else timeframe,
+            'qInMeta':qInMeta,
+            'tag':tag, 
+            'sentiment':sentiment,
+            'coin':coin,
+            'excludefield':excludefield,
+            'from_date':from_date,
+            'to_date':to_date,
+            'removeduplicate':removeduplicate,
+            'raw_query':raw_query,
+            'id':id,
+            'excludelanguage':excludelanguage, 
+            'url':url, 
+            'sort':sort
         }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        if scroll == True:
-            return self.__get_feeds_all(url=f'{self.crypto_url}?{URL_parameters_encoded}',max_result=max_result)
+        if scroll:
+            return self.__get_feeds_all(endpoint=self.crypto_url,query_params=URL_parameters,max_result=max_result)
+        elif paginate:
+            return self.__paginate_results(endpoint=self.crypto_url,query_params=URL_parameters)
         else:
-            return self.__get_feeds(url=f'{self.crypto_url}?{URL_parameters_encoded}') 
+            return self.__get_feeds(endpoint=self.crypto_url,query_params=URL_parameters)
 
     def count_api(
-        self, q:Optional[str]=None, qInTitle:Optional[str]=None, qInMeta:Optional[str]=None, country:Optional[Union[str, list]]=None,
-        category:Optional[Union[str, list]]=None,language:Optional[Union[str, list]]=None, from_date:Optional[str]=None,
-        to_date:Optional[str]=None,raw_query:Optional[str]=None
-    ) -> dict:
+            self, 
+            q: Optional[str] = None, 
+            qInTitle: Optional[str] = None, 
+            qInMeta: Optional[str] = None, 
+            country: Optional[Union[str, List[str]]] = None,
+            category: Optional[Union[str, List[str]]] = None, 
+            language: Optional[Union[str, List[str]]] = None, 
+            from_date: Optional[str] = None,
+            to_date: Optional[str] = None, 
+
+            raw_query: Optional[str] = None,
+        ) -> Dict[str, Any]:
         """
         Sending GET request to the count api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         params = {
-            'q':q,'qInTitle':qInTitle,'country':country,'category':category,'language':language,'from_date':from_date,'to_date':to_date,
-            'apikey':self.apikey,'qInMeta':qInMeta,'raw_query':raw_query
+            'q':q,
+            'qInTitle':qInTitle,
+            'country':country,
+            'category':category,
+            'language':language,
+            'from_date':from_date,
+            'to_date':to_date,
+            'qInMeta':qInMeta,
+            'raw_query':raw_query
         }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        return self.__get_feeds(url=f'{self.count_url}?{URL_parameters_encoded}') 
+        return self.__get_feeds(endpoint=self.count_url,query_params=URL_parameters) 
     
     def crypto_count_api(
-        self, q:Optional[str]=None, qInTitle:Optional[str]=None, qInMeta:Optional[str]=None,language:Optional[Union[str, list]]=None,
-        from_date:Optional[str]=None,to_date:Optional[str]=None,coin:Optional[str]=None,raw_query:Optional[str]=None
-    ) -> dict:
+            self, 
+            q: Optional[str] = None, 
+            qInTitle: Optional[str] = None, 
+            qInMeta: Optional[str] = None, 
+            language: Optional[Union[str, List[str]]] = None,
+            from_date: Optional[str] = None, 
+            to_date: Optional[str] = None, 
+            coin: Optional[Union[str, List[str]]] = None, 
+
+            raw_query: Optional[str] = None,
+        ) -> Dict[str, Any]:
         """
         Sending GET request to the crypto count api
         For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
         """
         params = {
-            'q':q,'qInTitle':qInTitle,'language':language,'from_date':from_date,'to_date':to_date,'coin':coin,
-            'apikey':self.apikey,'qInMeta':qInMeta,'raw_query':raw_query
+            'q':q,
+            'qInTitle':qInTitle,
+            'language':language,
+            'from_date':from_date,
+            'to_date':to_date,
+            'coin':coin,
+            'qInMeta':qInMeta,
+            'raw_query':raw_query
         }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
-        return self.__get_feeds(url=f'{self.crypto_count_url}?{URL_parameters_encoded}') 
+        return self.__get_feeds(endpoint=self.crypto_count_url,query_params=URL_parameters) 
+
+    def market_api(
+        self, 
+        q: Optional[str] = None, 
+        qintitle: Optional[str] = None, 
+        qinmeta: Optional[str] = None, 
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None, 
+        domain: Optional[str] = None, 
+        language: Optional[Union[str, List[str]]] = None, 
+        page: Optional[str] = None,
+        adv: Optional[bool] = None, 
+        full_content: Optional[bool] = None, 
+        image: Optional[bool] = None,
+        video: Optional[bool] = None, 
+        timeframe: Optional[Union[int, str]] = None, 
+        prioritydomain: Optional[str] = None, 
+        timezone: Optional[str] = None,
+        size: Optional[int] = None, 
+        domainurl: Optional[Union[str, List[str]]] = None, 
+        excludedomain: Optional[Union[str, List[str]]] = None, 
+        tag: Optional[Union[str, List[str]]] = None,
+        sentiment: Optional[str] = None, 
+        id: Optional[str] = None, 
+        excludefield: Optional[Union[str, List[str]]] = None, 
+        removeduplicate: Optional[bool] = None,
+        webhook: Optional[str] = None, 
+        excludelanguage: Optional[Union[str, List[str]]] = None, 
+        organization: Optional[str] = None, 
+        url: Optional[str] = None,
+        sort: Optional[str] = None, 
+        symbol: Optional[str] = None, 
+        country: Optional[Union[str, List[str]]] = None,
+
+        max_result: Optional[int] = None,
+        scroll: Optional[bool] = False,
+        paginate: Optional[bool] = False,
+        ) -> Dict[str, Any]:
+        """
+        Sending GET request to the market api
+        For more information about parameters and input, Please visit our documentation page: https://newsdata.io/documentation
+        """
+        params = {
+            'domain': domain, 
+            'language': language, 
+            'page': page, 
+            'q': q, 
+            'qInTitle': qintitle, 
+            'qInMeta': qinmeta,
+            'from_date': from_date, 
+            'to_date': to_date, 
+            'adv': adv, 
+            'full_content': full_content, 
+            'image': image, 
+            'video': video,
+            'timeframe': str(timeframe) if timeframe else timeframe, 
+            'prioritydomain': prioritydomain, 
+            'timezone': timezone, 
+            'size': size,
+            'domainurl': domainurl, 
+            'excludedomain': excludedomain, 
+            'tag': tag, 
+            'sentiment': sentiment, 
+            'id': id, 
+            'excludefield': excludefield,
+            'removeduplicate': removeduplicate, 
+            'webhook': webhook, 
+            'excludelanguage': excludelanguage, 
+            'organization': organization,
+            'url': url, 
+            'sort': sort, 
+            'symbol': symbol, 
+            'country': country
+        }
+        URL_parameters = self.__validate_parms(user_param=params)
+        if scroll:
+            return self.__get_feeds_all(endpoint=self.market_url,query_params=URL_parameters,max_result=max_result)
+        elif paginate:
+            return self.__paginate_results(endpoint=self.market_url,query_params=URL_parameters)
+        else:
+            return self.__get_feeds(endpoint=self.market_url,query_params=URL_parameters)
+    
+    def __paginate_results(self,endpoint:str,query_params:dict):
+        self.request_method = requests.Session()
+        current_result_count = 0
+        page = 0
+        while True:
+            response = self.__get_feeds(endpoint=endpoint,query_params=query_params)
+            if response['status'] == 'success':
+                current_result_count += len(response['results'])
+                page += 1
+                logger.info(f"Total result: {response['totalResults']}, Current result count: {current_result_count}, Page: {page}")
+                yield response
+                
+                if response['nextPage'] is None:
+                    return
+                query_params['page'] = response['nextPage']
+                time.sleep(constants.PAGINATION_SLEEP)
 
     def __del__(self):
         if isinstance(self.request_method,requests.Session):
