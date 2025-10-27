@@ -21,7 +21,8 @@ class NewsDataApiClient(FileHandler):
             max_retries: Optional[int] = constants.DEFAULT_MAX_RETRIES, 
             retry_delay: Optional[int] = constants.DEFAULT_RETRY_DELAY,
             request_timeout: Optional[int] = constants.DEFAULT_REQUEST_TIMEOUT, 
-            max_result: Optional[int] = 10**10, 
+            max_result: Optional[int] = 10**10,
+            max_pages: Optional[int] = 10**10,
             debug: Optional[bool] = False,
             folder_path: Optional[str] = None, 
             include_headers: Optional[bool] = False
@@ -30,6 +31,7 @@ class NewsDataApiClient(FileHandler):
         self.apikey = apikey
         self.request_method:requests = requests if session == False else requests.Session()
         self.max_result = max_result
+        self.max_pages = max_pages
         self.max_retries = max_retries
         self.retry_delay = retry_delay
         self.proxies = proxies
@@ -121,7 +123,7 @@ class NewsDataApiClient(FileHandler):
     
     def __get_feeds(self, endpoint: str, query_params: dict) -> Dict[str, Any]:
         retry_count = 0
-        while retry_count < self.max_retries:
+        while retry_count <= self.max_retries:
             retry_count += 1
             try:
                 s_time = time.perf_counter()
@@ -198,7 +200,10 @@ class NewsDataApiClient(FileHandler):
 
             time.sleep(constants.PAGINATION_SLEEP)
 
-    def __paginate_results(self,endpoint:str,query_params:dict):
+    def __paginate_results(self,endpoint:str,query_params:dict,max_pages: Optional[int] = None):
+        if max_pages is None:
+            max_pages = self.max_pages
+
         self.request_method = requests.Session()
         current_result_count = 0
         page = 0
@@ -210,8 +215,14 @@ class NewsDataApiClient(FileHandler):
                 logger.info(f"Total result: {response['totalResults']}, Current result count: {current_result_count}, Page: {page}")
                 yield response
                 
-                if response['nextPage'] is None:
+                if page >= max_pages:
+                    logger.info(f"Reached maximum page limit: {max_pages}, ending pagination.")
                     return
+                
+                if response['nextPage'] is None:
+                    logger.info("No more pages to fetch, ending pagination.")
+                    return
+                
                 query_params['page'] = response['nextPage']
                 time.sleep(constants.PAGINATION_SLEEP)
 
@@ -314,6 +325,7 @@ class NewsDataApiClient(FileHandler):
             max_result: Optional[int] = None, 
             scroll: Optional[bool] = False,
             paginate: Optional[bool] = False,
+            max_pages: Optional[int] = None,
         ) -> Dict[str, Any]:
         """ 
             Sending GET request to the latest api.
@@ -357,7 +369,7 @@ class NewsDataApiClient(FileHandler):
         if scroll:
             return self.__get_feeds_all(endpoint=self.latest_url,query_params=URL_parameters,max_result=max_result)
         elif paginate:
-            return self.__paginate_results(endpoint=self.latest_url,query_params=URL_parameters)
+            return self.__paginate_results(endpoint=self.latest_url,query_params=URL_parameters,max_pages=max_pages)
         else:
             return self.__get_feeds(endpoint=self.latest_url,query_params=URL_parameters)
 
@@ -388,10 +400,11 @@ class NewsDataApiClient(FileHandler):
             url: Optional[str] = None, 
             sort: Optional[str] = None,
 
-            paginate: Optional[bool] = False,
             raw_query: Optional[str] = None,
             scroll: Optional[bool] = False, 
             max_result: Optional[int] = None,
+            paginate: Optional[bool] = False,
+            max_pages: Optional[int] = None,
         ) -> Dict[str, Any]:
         """
         Sending GET request to the archive api
@@ -431,7 +444,7 @@ class NewsDataApiClient(FileHandler):
         if scroll:
             return self.__get_feeds_all(endpoint=self.archive_url,query_params=URL_parameters,max_result=max_result)
         elif paginate:
-            return self.__paginate_results(endpoint=self.archive_url,query_params=URL_parameters)
+            return self.__paginate_results(endpoint=self.archive_url,query_params=URL_parameters,max_pages=max_pages)
         else:
             return self.__get_feeds(endpoint=self.archive_url,query_params=URL_parameters)
     
@@ -490,9 +503,10 @@ class NewsDataApiClient(FileHandler):
             url: Optional[str] = None, 
             sort: Optional[str] = None,
 
-            paginate: Optional[bool] = False,
             scroll: Optional[bool] = False, 
             max_result: Optional[int] = None, 
+            paginate: Optional[bool] = False,
+            max_pages: Optional[int] = None,
         ) -> Dict[str, Any]:
         """ 
         Sending GET request to the crypto api
@@ -535,7 +549,7 @@ class NewsDataApiClient(FileHandler):
         if scroll:
             return self.__get_feeds_all(endpoint=self.crypto_url,query_params=URL_parameters,max_result=max_result)
         elif paginate:
-            return self.__paginate_results(endpoint=self.crypto_url,query_params=URL_parameters)
+            return self.__paginate_results(endpoint=self.crypto_url,query_params=URL_parameters,max_pages=max_pages)
         else:
             return self.__get_feeds(endpoint=self.crypto_url,query_params=URL_parameters)
 
@@ -634,6 +648,7 @@ class NewsDataApiClient(FileHandler):
         max_result: Optional[int] = None,
         scroll: Optional[bool] = False,
         paginate: Optional[bool] = False,
+        max_pages: Optional[int] = None,
         ) -> Dict[str, Any]:
         """
         Sending GET request to the market api
@@ -677,7 +692,7 @@ class NewsDataApiClient(FileHandler):
         if scroll:
             return self.__get_feeds_all(endpoint=self.market_url,query_params=URL_parameters,max_result=max_result)
         elif paginate:
-            return self.__paginate_results(endpoint=self.market_url,query_params=URL_parameters)
+            return self.__paginate_results(endpoint=self.market_url,query_params=URL_parameters,max_pages=max_pages)
         else:
             return self.__get_feeds(endpoint=self.market_url,query_params=URL_parameters)
     
