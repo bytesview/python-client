@@ -99,7 +99,9 @@ class NewsDataApiClient(FileHandler):
 
         valid_parms = {}
         for param,value in user_param.items():
-            if not value:continue
+            if value is None:
+                continue
+            
             if param in string_params:
                 if isinstance(value,list):
                     value = ','.join(value)
@@ -172,9 +174,6 @@ class NewsDataApiClient(FileHandler):
             time.sleep(self.retry_delay)
             
             if isinstance(self.request_method,requests.Session):
-                if self.request_method:
-                    self.request_method.close()
-
                 self.request_method = requests.Session()
             
             retry_count += 1
@@ -269,11 +268,10 @@ class NewsDataApiClient(FileHandler):
             'raw_query':raw_query
         }
         URL_parameters = self.__validate_parms(user_param=params)
-        URL_parameters_encoded = urlencode(URL_parameters, quote_via=quote)
         if scroll:
-            return self.__get_feeds_all(url=f'{self.latest_url}?{URL_parameters_encoded}',max_result=max_result)
+            return self.__get_feeds_all(endpoint=self.latest_url,query_params=URL_parameters,max_result=max_result)
         else:
-            return self.__get_feeds(url=f'{self.latest_url}?{URL_parameters_encoded}')
+            return self.__get_feeds(endpoint=self.latest_url,query_params=URL_parameters)
     
     def latest_api(
             self, 
@@ -589,14 +587,13 @@ class NewsDataApiClient(FileHandler):
     def market_api(
         self, 
         q: Optional[str] = None, 
-        qintitle: Optional[str] = None, 
-        qinmeta: Optional[str] = None, 
+        qInTitle: Optional[str] = None, 
+        qInMeta: Optional[str] = None, 
         from_date: Optional[str] = None,
         to_date: Optional[str] = None, 
         domain: Optional[str] = None, 
         language: Optional[Union[str, List[str]]] = None, 
         page: Optional[str] = None,
-        adv: Optional[bool] = None, 
         full_content: Optional[bool] = None, 
         image: Optional[bool] = None,
         video: Optional[bool] = None, 
@@ -632,11 +629,10 @@ class NewsDataApiClient(FileHandler):
             'language': language, 
             'page': page, 
             'q': q, 
-            'qInTitle': qintitle, 
-            'qInMeta': qinmeta,
+            'qInTitle': qInTitle, 
+            'qInMeta': qInMeta,
             'from_date': from_date, 
-            'to_date': to_date, 
-            'adv': adv, 
+            'to_date': to_date,
             'full_content': full_content, 
             'image': image, 
             'video': video,
