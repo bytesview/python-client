@@ -39,3 +39,7 @@ class test_newsdataapi(unittest.TestCase):
     def test_crypto_count_api(self):
         response = self.api.crypto_count_api(q='bitcoin',language='en')
         self.assertEqual(response['status'], "success")
+
+    def test_market_api(self):
+        response = self.api.market_api()
+        self.assertEqual(response['status'], "success")
