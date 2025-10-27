@@ -119,67 +119,57 @@ class NewsDataApiClient(FileHandler):
 
         return valid_parms
     
-    def __get_feeds(self, endpoint:str, query_params:dict, retry_count: Optional[int] = None) -> Dict[str, Any]:
-        try:
-            if retry_count is None:
-                retry_count = 0
-
-            if retry_count >= self.max_retries:
-                raise  NewsdataException(f'Maximum retry limit reached : {self.max_retries}.')
-            
-            s_time = time.perf_counter()
-            query_params.update({'apikey':self.apikey})
-            url = f'{endpoint}?{urlencode(query_params,quote_via=quote)}'
-            
-            logger.info(f"Fetching data from URL: {url}")
-            response = self.request_method.get(url=url,proxies=self.proxies,timeout=self.request_timeout)
-            logger.info(f"Time taken to fetch data: {time.perf_counter() - s_time}")
-
-            X_API_Limit_Remaining = response.headers.get("X-API-Limit-Remaining")
-            X_RateLimit_Remaining = response.headers.get("X-RateLimit-Remaining")
-            logger.info(f'X-API-Limit-Remaining: {X_API_Limit_Remaining}, X-RateLimit-Remaining: {X_RateLimit_Remaining}')
-            
-            feeds_data:dict = response.json()
-            if self.include_headers == True:
-                feeds_data.update({'response_headers':dict(response.headers)})
-
-            if response.status_code == 200 and feeds_data.get('status') == 'success':
-                return feeds_data
-
-            if response.status_code == 500:
-                logger.error(f"Encountered 'ServerError' going to sleep for: {self.retry_delay} seconds.")
-                time.sleep(self.retry_delay)
-                retry_count += 1
-                return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
-
-            elif response.status_code == 429:
-                Retry_After = int(response.headers.get("Retry-After",self.retry_delay))
-                
-                if feeds_data.get('results',{}).get('code') == 'TooManyRequests':
-                    logger.error(f"Encountered 'TooManyRequests' going to sleep for: {Retry_After} seconds.")
-                    time.sleep(Retry_After)
-                    retry_count += 1
-                    return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
-            
-                elif feeds_data.get('results',{}).get('code') == 'RateLimitExceeded':
-                    logger.error(f"Encountered 'RateLimitExceeded' going to sleep for: {Retry_After} seconds.")
-                    time.sleep(Retry_After)
-                    retry_count += 1
-                    return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
-            else:
-                raise NewsdataException(response.json())
-
-        except RequestException as e:
-            logger.error(f"Encountered 'ConnectionError' going to sleep for: {self.retry_delay} seconds. Reason: {e}")
-            time.sleep(self.retry_delay)
-            
-            if isinstance(self.request_method,requests.Session):
-                self.request_method = requests.Session()
-            
+    def __get_feeds(self, endpoint: str, query_params: dict) -> Dict[str, Any]:
+        retry_count = 0
+        while retry_count < self.max_retries:
             retry_count += 1
-            logger.info(f"Retrying request for: {url}, Retry count: {retry_count}")
-            return self.__get_feeds(endpoint=endpoint,query_params=query_params,retry_count=retry_count)
+            try:
+                s_time = time.perf_counter()
+                params = query_params.copy()
+                params['apikey'] = self.apikey
+                url = f"{endpoint}?{urlencode(params, quote_via=quote)}"
 
+                logger.info(f"Fetching data from URL: {url}")
+                response = self.request_method.get(url=url, proxies=self.proxies, timeout=self.request_timeout)
+                logger.info(f"Time taken to fetch data: {time.perf_counter() - s_time:.2f} seconds")
+
+                X_API_Limit_Remaining = response.headers.get("X-API-Limit-Remaining")
+                X_RateLimit_Remaining = response.headers.get("X-RateLimit-Remaining")
+                logger.info(f"X-API-Limit-Remaining: {X_API_Limit_Remaining}, X-RateLimit-Remaining: {X_RateLimit_Remaining}")
+
+                try:
+                    feeds_data: dict = response.json()
+                except:
+                    raise NewsdataException(f"Invalid JSON response: {response.text[:200]}")
+
+                if self.include_headers:
+                    feeds_data['response_headers'] = dict(response.headers)
+
+                if response.status_code == 200 and feeds_data.get('status') == 'success':
+                    return feeds_data
+
+                elif response.status_code == 500:
+                    logger.error(f"Encountered 'ServerError' - sleeping for {self.retry_delay}s.")
+                    time.sleep(self.retry_delay)
+                    continue
+
+                elif response.status_code == 429:
+                    Retry_After = int(response.headers.get("Retry-After", self.retry_delay))
+                    logger.error(f"Rate limit exceeded - sleeping for {Retry_After}s. (Attempt {retry_count}/{self.max_retries})")
+                    time.sleep(Retry_After)
+                    continue
+
+                else:
+                    msg = f"Unexpected response {response.status_code}: {response.text[:200]}"
+                    raise NewsdataException(msg)
+
+            except RequestException as e:
+                logger.error(f"ConnectionError on attempt {retry_count}/{self.max_retries}: {e}. Sleeping {self.retry_delay}s.")
+                time.sleep(self.retry_delay)
+
+        raise NewsdataException(f"Maximum retry limit reached: {self.max_retries}.")
+
+    
     def __get_feeds_all(self, endpoint:str,query_params:dict, max_result: Optional[int] = None) -> Dict[str, Any]:
 
         if max_result is None:
