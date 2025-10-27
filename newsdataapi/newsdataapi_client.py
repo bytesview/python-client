@@ -350,6 +350,9 @@ class NewsDataApiClient(FileHandler):
             'url':url, 
             'sort':sort
         }
+        if scroll and paginate:
+            raise NewsdataException("Both 'scroll' and 'paginate' cannot be True at the same time.")
+        
         URL_parameters = self.__validate_parms(user_param=params)
         if scroll:
             return self.__get_feeds_all(endpoint=self.latest_url,query_params=URL_parameters,max_result=max_result)
@@ -421,6 +424,9 @@ class NewsDataApiClient(FileHandler):
             'url':url, 
             'sort':sort
         }
+        if scroll and paginate:
+            raise NewsdataException("Both 'scroll' and 'paginate' cannot be True at the same time.")
+        
         URL_parameters = self.__validate_parms(user_param=params)
         if scroll:
             return self.__get_feeds_all(endpoint=self.archive_url,query_params=URL_parameters,max_result=max_result)
@@ -522,6 +528,9 @@ class NewsDataApiClient(FileHandler):
             'url':url, 
             'sort':sort
         }
+        if scroll and paginate:
+            raise NewsdataException("Both 'scroll' and 'paginate' cannot be True at the same time.")
+        
         URL_parameters = self.__validate_parms(user_param=params)
         if scroll:
             return self.__get_feeds_all(endpoint=self.crypto_url,query_params=URL_parameters,max_result=max_result)
@@ -661,6 +670,9 @@ class NewsDataApiClient(FileHandler):
             'symbol': symbol, 
             'country': country
         }
+        if scroll and paginate:
+            raise NewsdataException("Both 'scroll' and 'paginate' cannot be True at the same time.")
+        
         URL_parameters = self.__validate_parms(user_param=params)
         if scroll:
             return self.__get_feeds_all(endpoint=self.market_url,query_params=URL_parameters,max_result=max_result)
