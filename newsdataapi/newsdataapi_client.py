@@ -169,7 +169,6 @@ class NewsDataApiClient(FileHandler):
 
         raise NewsdataException(f"Maximum retry limit reached: {self.max_retries}.")
 
-    
     def __get_feeds_all(self, endpoint:str,query_params:dict, max_result: Optional[int] = None) -> Dict[str, Any]:
 
         if max_result is None:
@@ -198,6 +197,23 @@ class NewsDataApiClient(FileHandler):
                 return data
 
             time.sleep(constants.PAGINATION_SLEEP)
+
+    def __paginate_results(self,endpoint:str,query_params:dict):
+        self.request_method = requests.Session()
+        current_result_count = 0
+        page = 0
+        while True:
+            response = self.__get_feeds(endpoint=endpoint,query_params=query_params)
+            if response['status'] == 'success':
+                current_result_count += len(response['results'])
+                page += 1
+                logger.info(f"Total result: {response['totalResults']}, Current result count: {current_result_count}, Page: {page}")
+                yield response
+                
+                if response['nextPage'] is None:
+                    return
+                query_params['page'] = response['nextPage']
+                time.sleep(constants.PAGINATION_SLEEP)
 
     def news_api(
             self, 
@@ -653,23 +669,6 @@ class NewsDataApiClient(FileHandler):
         else:
             return self.__get_feeds(endpoint=self.market_url,query_params=URL_parameters)
     
-    def __paginate_results(self,endpoint:str,query_params:dict):
-        self.request_method = requests.Session()
-        current_result_count = 0
-        page = 0
-        while True:
-            response = self.__get_feeds(endpoint=endpoint,query_params=query_params)
-            if response['status'] == 'success':
-                current_result_count += len(response['results'])
-                page += 1
-                logger.info(f"Total result: {response['totalResults']}, Current result count: {current_result_count}, Page: {page}")
-                yield response
-                
-                if response['nextPage'] is None:
-                    return
-                query_params['page'] = response['nextPage']
-                time.sleep(constants.PAGINATION_SLEEP)
-
     def __del__(self):
         if isinstance(self.request_method,requests.Session):
             self.request_method.close()
