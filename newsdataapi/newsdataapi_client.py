@@ -149,7 +149,7 @@ class NewsDataApiClient(FileHandler):
                     return feeds_data
 
                 elif response.status_code == 500:
-                    logger.error(f"Encountered 'ServerError' - sleeping for {self.retry_delay}s.")
+                    logger.error(f"Encountered 'ServerError' - sleeping for {self.retry_delay}s. (Attempt {retry_count}/{self.max_retries})")
                     time.sleep(self.retry_delay)
                     continue
 
