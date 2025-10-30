@@ -20,6 +20,7 @@ class NewsDataApiClient(FileHandler):
             proxies: Optional[Dict[str, Any]] = None, 
             max_retries: Optional[int] = constants.DEFAULT_MAX_RETRIES, 
             retry_delay: Optional[int] = constants.DEFAULT_RETRY_DELAY,
+            pagination_delay: Optional[int] = constants.PAGINATION_DELAY,
             request_timeout: Optional[int] = constants.DEFAULT_REQUEST_TIMEOUT, 
             max_result: Optional[int] = 10**10,
             max_pages: Optional[int] = 10**10,
@@ -34,6 +35,7 @@ class NewsDataApiClient(FileHandler):
         self.max_pages = max_pages
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.pagination_delay = pagination_delay
         self.proxies = proxies
         self.request_timeout = request_timeout
         # self.is_debug = debug
@@ -59,13 +61,14 @@ class NewsDataApiClient(FileHandler):
         """ API maximum timeout for the request """
         self.request_timeout = request_timeout
 
-    def get_current_dt(self)->str:
-        return datetime.now(tz=timezone.utc).replace(microsecond=0).strftime("%Y-%m-%d %H:%M:%S")
-
     def api_proxies( self, proxies:dict)->None:
         """ Configure Proxie dictionary """
         self.proxies = proxies
     
+    def set_pagination_delay( self, pagination_delay:int)->None:
+        """ Set delay between paginated requests """
+        self.pagination_delay = pagination_delay
+
     def __validate_parms(self, user_param: Dict[str, Any]) -> Dict[str, Any]:
         bool_params = {'full_content','image','video','removeduplicate'}
         int_params = {'size'}
@@ -122,9 +125,7 @@ class NewsDataApiClient(FileHandler):
         return valid_parms
     
     def __get_feeds(self, endpoint: str, query_params: dict) -> Dict[str, Any]:
-        retry_count = 0
-        while retry_count <= self.max_retries:
-            retry_count += 1
+        for retry_count in range(1,self.max_retries+1):
             try:
                 s_time = time.perf_counter()
                 params = query_params.copy()
@@ -139,15 +140,15 @@ class NewsDataApiClient(FileHandler):
                 X_RateLimit_Remaining = response.headers.get("X-RateLimit-Remaining")
                 logger.info(f"X-API-Limit-Remaining: {X_API_Limit_Remaining}, X-RateLimit-Remaining: {X_RateLimit_Remaining}")
 
-                try:
-                    feeds_data: dict = response.json()
-                except:
-                    raise NewsdataException(f"Invalid JSON response: {response.text[:200]}")
-
-                if self.include_headers:
-                    feeds_data['response_headers'] = dict(response.headers)
-
-                if response.status_code == 200 and feeds_data.get('status') == 'success':
+                feeds_data: dict = response.json()
+                
+                if (
+                    response.status_code == 200 
+                    and feeds_data.get('status') == 'success' 
+                    and feeds_data.get('results') is not None
+                ):
+                    if self.include_headers:
+                        feeds_data['response_headers'] = dict(response.headers)
                     return feeds_data
 
                 elif response.status_code == 500:
@@ -162,11 +163,17 @@ class NewsDataApiClient(FileHandler):
                     continue
 
                 else:
-                    msg = f"Unexpected response {response.status_code}: {response.text[:200]}"
-                    raise NewsdataException(msg)
+                    raise NewsdataException(feeds_data)
+            
+            except NewsdataException as e:
+                raise e
 
             except RequestException as e:
                 logger.error(f"ConnectionError on attempt {retry_count}/{self.max_retries}: {e}. Sleeping {self.retry_delay}s.")
+                time.sleep(self.retry_delay)
+            
+            except Exception as e:
+                logger.error(f"Unexpected error on attempt {retry_count}/{self.max_retries}: {e}. Sleeping {self.retry_delay}s.")
                 time.sleep(self.retry_delay)
 
         raise NewsdataException(f"Maximum retry limit reached: {self.max_retries}.")
@@ -198,7 +205,7 @@ class NewsDataApiClient(FileHandler):
             if max_result and len(data['results']) >= max_result:
                 return data
 
-            time.sleep(constants.PAGINATION_SLEEP)
+            time.sleep(self.pagination_delay)
 
     def __paginate_results(self,endpoint:str,query_params:dict,max_pages: Optional[int] = None):
         if max_pages is None:
@@ -209,22 +216,21 @@ class NewsDataApiClient(FileHandler):
         page = 0
         while True:
             response = self.__get_feeds(endpoint=endpoint,query_params=query_params)
-            if response['status'] == 'success':
-                current_result_count += len(response['results'])
-                page += 1
-                logger.info(f"Total result: {response['totalResults']}, Current result count: {current_result_count}, Page: {page}")
-                yield response
-                
-                if page >= max_pages:
-                    logger.info(f"Reached maximum page limit: {max_pages}, ending pagination.")
-                    return
-                
-                if response['nextPage'] is None:
-                    logger.info("No more pages to fetch, ending pagination.")
-                    return
-                
-                query_params['page'] = response['nextPage']
-                time.sleep(constants.PAGINATION_SLEEP)
+            current_result_count += len(response['results'])
+            page += 1
+            logger.info(f"Total result: {response['totalResults']}, Current result count: {current_result_count}, Page: {page}")
+            yield response
+            
+            if page >= max_pages:
+                logger.info(f"Reached maximum page limit: {max_pages}, ending pagination.")
+                return
+            
+            if response['nextPage'] is None:
+                logger.info("No more pages to fetch, ending pagination.")
+                return
+            
+            query_params['page'] = response['nextPage']
+            time.sleep(self.pagination_delay)
 
     def news_api(
             self, 
