@@ -145,7 +145,7 @@ class NewsDataApiClient(FileHandler):
                 if (
                     response.status_code == 200 
                     and feeds_data.get('status') == 'success' 
-                    and feeds_data.get('results') is not None
+                    and (feeds_data.get('results') is not None or feeds_data.get('result') is not None)
                 ):
                     if self.include_headers:
                         feeds_data['response_headers'] = dict(response.headers)
