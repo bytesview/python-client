@@ -1,15 +1,17 @@
-"""Synchronous consumer for the NewsData.io real-time WebSocket service.
+"""Consumers for the NewsData.io real-time WebSocket service.
 
-Requires the optional ``websocket`` extra::
+:class:`NewsDataApiWebSocket` is synchronous; :class:`NewsDataApiWebSocketAsync`
+is its asyncio counterpart. Both require the optional ``websocket`` extra::
 
     pip install "newsdataapi[websocket]"
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
-from collections.abc import Iterator
+from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
 from . import constants
@@ -20,31 +22,42 @@ _RECONNECT_DELAY = 1.0        # default seconds before the first reconnect; doub
 _RECONNECT_DELAY_MAX = 30.0   # default cap on the reconnect delay
 
 
-class NewsDataApiWebSocket:
-    """Streams real-time news matched by a registered percolator query.
+def _permanent_auth_error(exc: Exception) -> NewsdataWebSocketAuthError | None:
+    """Return the auth error to raise if ``exc`` is a permanent rejection.
 
-    ``registration_id`` is the ``doc_id`` returned when the query was
-    registered. Call :meth:`stream` (or iterate the object directly) to
-    receive matched articles as they arrive::
+    Returns ``None`` for transient failures (which the caller reconnects on):
+    handshake 401/403 and policy-violation close 1008 are permanent; anything
+    else (other handshake status, other close codes, network ``OSError``) is
+    transient.
+    """
+    from websockets.exceptions import ConnectionClosedError, InvalidStatus
 
-        ws = NewsDataApiWebSocket(apikey, registration_id)
-        for article in ws.stream():        # or: for article in ws
-            print(article["title"])
+    if isinstance(exc, InvalidStatus):
+        if exc.response.status_code in (401, 403):
+            return NewsdataWebSocketAuthError("connection rejected")
+        return None
+    if isinstance(exc, ConnectionClosedError):
+        close = exc.rcvd
+        if close is not None and close.code == _POLICY_VIOLATION:
+            return NewsdataWebSocketAuthError(close.reason or "connection rejected")
+        return None
+    return None
 
-    Use it as a context manager to close the connection promptly when you stop
-    early (otherwise it closes when iteration ends or is garbage-collected)::
 
-        with NewsDataApiWebSocket(apikey, registration_id) as ws:
-            for article in ws:
-                ...
-                break
+def _transient_error(exc: Exception) -> NewsdataWebSocketError:
+    """Wrap a transient failure as a :class:`NewsdataWebSocketError` (used only
+    when ``reconnect=False`` so the caller stops instead of retrying)."""
+    from websockets.exceptions import ConnectionClosedError, InvalidStatus
 
-    Transient drops (network errors, server restarts, abnormal closes) are
-    reconnected automatically with a capped exponential backoff; pass
-    ``reconnect=False`` to stop on the first disconnect instead. A permanent
-    rejection (bad key, missing entitlement, unknown ``registration_id``,
-    device limit, or exhausted quota) always raises
-    :class:`~newsdataapi.NewsdataWebSocketAuthError` and is never retried.
+    if isinstance(exc, InvalidStatus):
+        return NewsdataWebSocketError(f"handshake failed (HTTP {exc.response.status_code})")
+    if isinstance(exc, ConnectionClosedError):
+        return NewsdataWebSocketError("connection closed")
+    return NewsdataWebSocketError(f"connection error: {exc}")
+
+
+class _BaseNewsDataApiWebSocket:
+    """Shared configuration for the sync and async WebSocket consumers.
 
     Args:
         apikey: Your NewsData.io API key.
@@ -58,8 +71,8 @@ class NewsDataApiWebSocket:
         reconnect_delay: Seconds to wait before the first reconnect; doubles
             after each consecutive failure.
         reconnect_delay_max: Upper bound on the reconnect delay.
-        open_timeout: Seconds to wait for the opening handshake before giving
-            up (``None`` disables the timeout).
+        open_timeout: Seconds to wait for the opening handshake (``None``
+            disables the timeout).
         ping_interval: Seconds between keepalive pings (``None`` disables
             keepalive).
         ping_timeout: Seconds to wait for a ping reply before considering the
@@ -96,6 +109,53 @@ class NewsDataApiWebSocket:
         self._proxy = proxy
         self._ws: Any = None  # the live connection, while one is open
 
+    @property
+    def _url(self) -> str:
+        return (
+            f"{self._base_url}?apikey={self._apikey}"
+            f"&registration_id={self._registration_id}"
+        )
+
+    def _connect_kwargs(self) -> dict[str, Any]:
+        return {
+            "open_timeout": self._open_timeout,
+            "ping_interval": self._ping_interval,
+            "ping_timeout": self._ping_timeout,
+            "additional_headers": self._additional_headers,
+            "proxy": self._proxy,
+        }
+
+    def _next_delay(self, delay: float) -> float:
+        return min(delay * 2, self._reconnect_delay_max)
+
+
+class NewsDataApiWebSocket(_BaseNewsDataApiWebSocket):
+    """Synchronous consumer of the real-time WebSocket service.
+
+    ``registration_id`` is the ``doc_id`` returned when the query was
+    registered. Call :meth:`stream` (or iterate the object directly) to
+    receive matched articles as they arrive::
+
+        ws = NewsDataApiWebSocket(apikey, registration_id)
+        for article in ws.stream():        # or: for article in ws
+            print(article["title"])
+
+    Use it as a context manager to close the connection promptly when you stop
+    early (otherwise it closes when iteration ends or is garbage-collected)::
+
+        with NewsDataApiWebSocket(apikey, registration_id) as ws:
+            for article in ws:
+                ...
+                break
+
+    Transient drops are reconnected automatically with a capped exponential
+    backoff (pass ``reconnect=False`` to stop on the first disconnect). A
+    permanent rejection (bad key, missing entitlement, unknown
+    ``registration_id``, device limit, or exhausted quota) always raises
+    :class:`~newsdataapi.NewsdataWebSocketAuthError` and is never retried. See
+    :class:`_BaseNewsDataApiWebSocket` for the full constructor signature.
+    """
+
     def stream(self) -> Iterator[dict[str, Any]]:
         """Connect and yield matched articles as they arrive.
 
@@ -111,52 +171,28 @@ class NewsDataApiWebSocket:
                 "pip install 'newsdataapi[websocket]'"
             ) from exc
 
-        url = (
-            f"{self._base_url}?apikey={self._apikey}"
-            f"&registration_id={self._registration_id}"
-        )
         delay = self._reconnect_delay
         while True:
             try:
-                with connect(
-                    url,
-                    open_timeout=self._open_timeout,
-                    ping_interval=self._ping_interval,
-                    ping_timeout=self._ping_timeout,
-                    additional_headers=self._additional_headers,
-                    proxy=self._proxy,
-                ) as websocket:
+                with connect(self._url, **self._connect_kwargs()) as websocket:
                     self._ws = websocket
                     delay = self._reconnect_delay  # reset after a successful connect
                     for message in websocket:
                         event = json.loads(message)
                         yield from event.get("items", [])
-            except InvalidStatus as exc:
-                status = exc.response.status_code
-                if status in (401, 403):
-                    raise NewsdataWebSocketAuthError("connection rejected") from exc
+            except (InvalidStatus, ConnectionClosedError, OSError) as exc:
+                auth = _permanent_auth_error(exc)
+                if auth is not None:
+                    raise auth from exc
                 if not self._reconnect:
-                    raise NewsdataWebSocketError(
-                        f"handshake failed (HTTP {status})"
-                    ) from exc
-            except ConnectionClosedError as exc:
-                close = exc.rcvd
-                if close is not None and close.code == _POLICY_VIOLATION:
-                    raise NewsdataWebSocketAuthError(
-                        close.reason or "connection rejected"
-                    ) from exc
-                if not self._reconnect:
-                    raise NewsdataWebSocketError("connection closed") from exc
-            except OSError as exc:
-                if not self._reconnect:
-                    raise NewsdataWebSocketError(f"connection error: {exc}") from exc
+                    raise _transient_error(exc) from exc
             else:
                 if not self._reconnect:
                     return  # normal close, reconnect disabled
             # Transient failure, or a normal close with reconnect enabled:
             # wait (capped exponential backoff) and reconnect.
             time.sleep(delay)
-            delay = min(delay * 2, self._reconnect_delay_max)
+            delay = self._next_delay(delay)
 
     def __iter__(self) -> Iterator[dict[str, Any]]:
         return self.stream()
@@ -166,7 +202,77 @@ class NewsDataApiWebSocket:
 
     def __exit__(self, *exc: object) -> None:
         # Close the active connection promptly (e.g. after an early break).
-        # Closing again on generator finalization is a harmless no-op.
         if self._ws is not None:
             self._ws.close()
+            self._ws = None
+
+
+class NewsDataApiWebSocketAsync(_BaseNewsDataApiWebSocket):
+    """Asyncio consumer of the real-time WebSocket service.
+
+    The async counterpart of :class:`NewsDataApiWebSocket`. Call :meth:`stream`
+    (or iterate the object directly) to receive matched articles::
+
+        ws = NewsDataApiWebSocketAsync(apikey, registration_id)
+        async for article in ws:           # or: async for article in ws.stream()
+            print(article["title"])
+
+    Use it as an async context manager to close the connection promptly when
+    you stop early::
+
+        async with NewsDataApiWebSocketAsync(apikey, registration_id) as ws:
+            async for article in ws:
+                ...
+                break
+
+    Reconnect and error semantics match the synchronous class; see
+    :class:`_BaseNewsDataApiWebSocket` for the full constructor signature.
+    """
+
+    async def stream(self) -> AsyncIterator[dict[str, Any]]:
+        """Connect and yield matched articles as they arrive.
+
+        This is the same as iterating the object directly
+        (``async for article in ws``).
+        """
+        try:
+            from websockets.asyncio.client import connect
+            from websockets.exceptions import ConnectionClosedError, InvalidStatus
+        except ImportError as exc:
+            raise NewsdataWebSocketError(
+                "the websocket extra is required: "
+                "pip install 'newsdataapi[websocket]'"
+            ) from exc
+
+        delay = self._reconnect_delay
+        while True:
+            try:
+                async with connect(self._url, **self._connect_kwargs()) as websocket:
+                    self._ws = websocket
+                    delay = self._reconnect_delay  # reset after a successful connect
+                    async for message in websocket:
+                        event = json.loads(message)
+                        for article in event.get("items", []):
+                            yield article
+            except (InvalidStatus, ConnectionClosedError, OSError) as exc:
+                auth = _permanent_auth_error(exc)
+                if auth is not None:
+                    raise auth from exc
+                if not self._reconnect:
+                    raise _transient_error(exc) from exc
+            else:
+                if not self._reconnect:
+                    return  # normal close, reconnect disabled
+            await asyncio.sleep(delay)
+            delay = self._next_delay(delay)
+
+    def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
+        return self.stream()
+
+    async def __aenter__(self) -> NewsDataApiWebSocketAsync:
+        return self
+
+    async def __aexit__(self, *exc: object) -> None:
+        if self._ws is not None:
+            await self._ws.close()
             self._ws = None

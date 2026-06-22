@@ -13,7 +13,7 @@
 
 </div>
 
-`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling. It also includes a real-time WebSocket consumer (`NewsDataApiWebSocket`) for streaming matched news as it is published.
+`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling. It also includes a real-time WebSocket consumer (`NewsDataApiWebSocket`, plus an async `NewsDataApiWebSocketAsync`) for streaming matched news as it is published.
 
 ## Installation
 
@@ -118,6 +118,20 @@ with NewsDataApiWebSocket(apikey, registration_id) as ws:
     for article in ws:
         print(article["title"])
         break
+```
+
+The same API is available asynchronously as `NewsDataApiWebSocketAsync` (same constructor, same behavior):
+
+```python
+import asyncio
+from newsdataapi import NewsDataApiWebSocketAsync
+
+async def main():
+    async with NewsDataApiWebSocketAsync(apikey, registration_id) as ws:
+        async for article in ws:           # or: async for article in ws.stream()
+            print(article["title"], "-", article["link"])
+
+asyncio.run(main())
 ```
 
 Transient drops (network errors, server restarts, abnormal closes) are reconnected automatically with a capped exponential backoff. Pass `reconnect=False` to stop on the first disconnect instead. A permanent rejection — bad API key, missing WebSocket entitlement, unknown `registration_id`, device limit reached, or exhausted quota — raises `NewsdataWebSocketAuthError` and is **not** retried:

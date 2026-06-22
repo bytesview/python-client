@@ -1,11 +1,14 @@
-"""Mocked unit tests for NewsDataApiWebSocket (sync consumer).
+"""Mocked unit tests for the sync and async WebSocket consumers.
 
-Patch ``websockets.sync.client.connect`` with a scripted fake. Skipped when
-``websockets`` is not installed (e.g. Python 3.8/3.9 without the extra).
+Patch ``websockets.sync.client.connect`` / ``websockets.asyncio.client.connect``
+with a scripted fake. Skipped when ``websockets`` is not installed (e.g. Python
+3.8/3.9 without the extra). Async tests drive the coroutines with
+``asyncio.run`` so no ``pytest-asyncio`` plugin is needed.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -19,11 +22,13 @@ from websockets.http11 import Response  # noqa: E402
 
 from newsdataapi import (  # noqa: E402
     NewsDataApiWebSocket,
+    NewsDataApiWebSocketAsync,
     NewsdataWebSocketAuthError,
     NewsdataWebSocketError,
 )
 
 CONNECT = "websockets.sync.client.connect"
+CONNECT_ASYNC = "websockets.asyncio.client.connect"
 
 
 def _news(*titles: str) -> str:
@@ -93,9 +98,14 @@ class _FakeConnect:
         return conn
 
 
+async def _anoop(*_a: object, **_k: object) -> None:
+    return None
+
+
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("newsdataapi.newsdata_websocket.time.sleep", lambda *_a: None)
+    monkeypatch.setattr("newsdataapi.newsdata_websocket.asyncio.sleep", _anoop)
 
 
 def _collect(ws: NewsDataApiWebSocket, sink: list[str]) -> None:
@@ -324,3 +334,226 @@ def test_missing_websockets_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setitem(sys.modules, "websockets.sync.client", None)
     with pytest.raises(NewsdataWebSocketError, match="pip install"):
         list(NewsDataApiWebSocket("k", "r"))
+
+
+# ===========================================================================
+# Async consumer (NewsDataApiWebSocketAsync)
+# ===========================================================================
+
+
+class _FakeAsyncWS:
+    """Scripted async connection: yields ``messages`` then raises ``terminal``
+    (a ConnectionClosedError) or ends normally if ``terminal`` is None."""
+
+    def __init__(self, messages: list, terminal: BaseException | None) -> None:
+        self._messages = messages
+        self._terminal = terminal
+        self.closed = False
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        for message in self._messages:
+            yield message
+        if self._terminal is not None:
+            raise self._terminal
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _FakeAsyncCM:
+    """The async context manager returned by the fake ``connect()``."""
+
+    def __init__(self, ws: _FakeAsyncWS | None, handshake_exc: BaseException | None) -> None:
+        self._ws = ws
+        self._handshake_exc = handshake_exc
+
+    async def __aenter__(self) -> _FakeAsyncWS:
+        if self._handshake_exc is not None:
+            raise self._handshake_exc
+        assert self._ws is not None
+        return self._ws
+
+    async def __aexit__(self, *exc: object) -> bool:
+        if self._ws is not None:
+            await self._ws.close()
+        return False
+
+
+class _FakeAsyncConnect:
+    """Scripted async ``connect``: each attempt is ``(messages, terminal)``.
+
+    An ``InvalidStatus`` / ``OSError`` terminal is raised from ``__aenter__``
+    (handshake failure); otherwise it is raised during async iteration.
+    """
+
+    def __init__(self, *attempts: tuple[list, BaseException | None]) -> None:
+        self._attempts = list(attempts)
+        self.calls = 0
+        self.urls: list[str] = []
+        self.kwargs: list[dict] = []
+        self.conns: list[_FakeAsyncWS] = []
+
+    def __call__(self, url: str, **kwargs: object) -> _FakeAsyncCM:
+        self.calls += 1
+        self.urls.append(url)
+        self.kwargs.append(kwargs)
+        if self._attempts:
+            messages, terminal = self._attempts.pop(0)
+        else:
+            messages, terminal = [], _closed(1008, "exhausted")
+        if isinstance(terminal, (InvalidStatus, OSError)):
+            return _FakeAsyncCM(None, terminal)
+        conn = _FakeAsyncWS(messages, terminal)
+        self.conns.append(conn)
+        return _FakeAsyncCM(conn, None)
+
+
+def _atitles(ws: NewsDataApiWebSocketAsync) -> list[str]:
+    """Fully consume the async stream and return article titles."""
+
+    async def go() -> list[str]:
+        return [article["title"] async for article in ws]
+
+    return asyncio.run(go())
+
+
+def _acollect(ws: NewsDataApiWebSocketAsync, sink: list[str]) -> None:
+    """Consume into ``sink`` so partial results survive a raised exception."""
+
+    async def go() -> None:
+        async for article in ws:
+            sink.append(article["title"])
+
+    asyncio.run(go())
+
+
+# --- basics -----------------------------------------------------------------
+
+
+def test_async_url_and_params(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(([_news("A")], None))
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+    headers = {"X-Trace": "1"}
+    ws = NewsDataApiWebSocketAsync(
+        "KEY",
+        "REG",
+        base_url="wss://staging.example/ws",
+        reconnect=False,
+        open_timeout=5.0,
+        additional_headers=headers,
+        proxy="http://proxy:3128",
+    )
+    _atitles(ws)
+    assert fake.urls[0] == "wss://staging.example/ws?apikey=KEY&registration_id=REG"
+    assert fake.kwargs[0]["open_timeout"] == 5.0
+    assert fake.kwargs[0]["additional_headers"] == headers
+    assert fake.kwargs[0]["proxy"] == "http://proxy:3128"
+
+
+def test_async_yields_flattened_articles(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(CONNECT_ASYNC, _FakeAsyncConnect(([_news("A", "B"), _news("C")], None)))
+    assert _atitles(NewsDataApiWebSocketAsync("k", "r", reconnect=False)) == ["A", "B", "C"]
+
+
+def test_async_stream_method_matches_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(CONNECT_ASYNC, _FakeAsyncConnect(([_news("A", "B")], None)))
+    ws = NewsDataApiWebSocketAsync("k", "r", reconnect=False)
+
+    async def go() -> list[str]:
+        return [a["title"] async for a in ws.stream()]
+
+    assert asyncio.run(go()) == ["A", "B"]
+
+
+# --- context manager --------------------------------------------------------
+
+
+def test_async_context_manager_closes_on_break(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(([_news("A"), _news("B")], None))
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+
+    async def go() -> None:
+        ws = NewsDataApiWebSocketAsync("k", "r", reconnect=False)
+        async with ws:
+            agen = ws.stream()
+            async for _article in agen:
+                break
+            await agen.aclose()  # close the suspended generator within the loop
+
+    asyncio.run(go())
+    assert fake.conns[0].closed is True
+    assert fake.calls == 1
+
+
+# --- permanent rejection ----------------------------------------------------
+
+
+def test_async_handshake_403_raises_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(([], _invalid_status(403)))
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+    with pytest.raises(NewsdataWebSocketAuthError):
+        _atitles(NewsDataApiWebSocketAsync("k", "r"))  # reconnect=True default
+    assert fake.calls == 1
+
+
+def test_async_close_1008_raises_auth_with_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(([_news("A")], _closed(1008, "device limit")))
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+    got: list[str] = []
+    with pytest.raises(NewsdataWebSocketAuthError, match="device limit"):
+        _acollect(NewsDataApiWebSocketAsync("k", "r"), got)
+    assert got == ["A"]
+    assert fake.calls == 1
+
+
+# --- reconnect=False --------------------------------------------------------
+
+
+def test_async_no_reconnect_abnormal_close_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(([_news("A")], _closed(1011, "boom")))
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+    got: list[str] = []
+    with pytest.raises(NewsdataWebSocketError) as exc_info:
+        _acollect(NewsDataApiWebSocketAsync("k", "r", reconnect=False), got)
+    assert not isinstance(exc_info.value, NewsdataWebSocketAuthError)
+    assert got == ["A"]
+
+
+# --- reconnect=True ---------------------------------------------------------
+
+
+def test_async_reconnects_on_transient_close(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(
+        ([_news("A")], _closed(1013, "slow client")),  # transient -> reconnect
+        ([_news("B")], _closed(1008, "stop")),  # permanent -> raise
+    )
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+    got: list[str] = []
+    with pytest.raises(NewsdataWebSocketAuthError):
+        _acollect(NewsDataApiWebSocketAsync("k", "r"), got)
+    assert got == ["A", "B"]
+    assert fake.calls == 2
+
+
+def test_async_reconnects_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake = _FakeAsyncConnect(
+        ([], OSError("connection refused")),  # network failure -> reconnect
+        ([_news("A")], _closed(1008, "stop")),
+    )
+    monkeypatch.setattr(CONNECT_ASYNC, fake)
+    got: list[str] = []
+    with pytest.raises(NewsdataWebSocketAuthError):
+        _acollect(NewsDataApiWebSocketAsync("k", "r"), got)
+    assert got == ["A"]
+    assert fake.calls == 2
+
+
+def test_async_missing_websockets_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
+    import sys
+
+    monkeypatch.setitem(sys.modules, "websockets.asyncio.client", None)
+    with pytest.raises(NewsdataWebSocketError, match="pip install"):
+        _atitles(NewsDataApiWebSocketAsync("k", "r"))
