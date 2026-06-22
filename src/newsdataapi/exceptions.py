@@ -96,3 +96,14 @@ class NewsdataNetworkError(NewsdataException):
     ) -> None:
         super().__init__(message)
         self.original = original
+
+
+class NewsdataWebSocketError(NewsdataException):
+    """A real-time WebSocket consumer error
+    (:class:`newsdataapi.NewsDataApiWebSocket`)."""
+
+
+class NewsdataWebSocketAuthError(NewsdataWebSocketError):
+    """The server rejected the WebSocket connection — bad API key, missing
+    WebSocket entitlement, unknown ``registration_id``, device limit reached,
+    or exhausted quota. Not retried."""

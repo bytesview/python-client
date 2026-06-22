@@ -13,7 +13,7 @@
 
 </div>
 
-`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling.
+`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling. It also includes a real-time WebSocket consumer (`NewsDataApiWebSocket`) for streaming matched news as it is published.
 
 ## Installation
 
@@ -27,7 +27,13 @@ If you use [uv](https://github.com/astral-sh/uv):
 uv add newsdataapi
 ```
 
-Supports Python 3.8 through 3.14. The only runtime dependency is `requests`.
+For real-time WebSocket streaming, install the optional `websocket` extra (requires Python 3.10+):
+
+```bash
+pip install "newsdataapi[websocket]"
+```
+
+Supports Python 3.8 through 3.14. The only runtime dependency is `requests`; the optional `websocket` extra adds `websockets`.
 
 ## Quickstart
 
@@ -87,6 +93,65 @@ for page in client.latest_api(q="news", paginate=True, max_pages=5):
 
 `scroll` and `paginate` are mutually exclusive. `scroll=True` truncates strictly to `max_result`; `paginate=True` stops at `max_pages` or when the API returns no `nextPage`.
 
+## Real-time news (WebSocket)
+
+Stream the articles that match a registered percolator query as they are published. This needs the optional `websocket` extra (Python 3.10+):
+
+```bash
+pip install "newsdataapi[websocket]"
+```
+
+Pass your API key and a `registration_id` (the `doc_id` returned when the percolator query was registered), then iterate:
+
+```python
+from newsdataapi import NewsDataApiWebSocket
+
+ws = NewsDataApiWebSocket(apikey, registration_id)
+for article in ws:                      # or: for article in ws.stream()
+    print(article["title"], "-", article["link"])
+```
+
+Use it as a context manager to close the connection promptly when you stop early (otherwise it closes when iteration ends):
+
+```python
+with NewsDataApiWebSocket(apikey, registration_id) as ws:
+    for article in ws:
+        print(article["title"])
+        break
+```
+
+Transient drops (network errors, server restarts, abnormal closes) are reconnected automatically with a capped exponential backoff. Pass `reconnect=False` to stop on the first disconnect instead. A permanent rejection — bad API key, missing WebSocket entitlement, unknown `registration_id`, device limit reached, or exhausted quota — raises `NewsdataWebSocketAuthError` and is **not** retried:
+
+```python
+from newsdataapi import NewsdataWebSocketAuthError, NewsdataWebSocketError
+
+try:
+    for article in NewsDataApiWebSocket(apikey, registration_id):
+        ...
+except NewsdataWebSocketAuthError as e:
+    print(f"rejected: {e}")
+except NewsdataWebSocketError as e:
+    print(f"stream error: {e}")
+```
+
+All connection options are keyword-only:
+
+```python
+ws = NewsDataApiWebSocket(
+    apikey,
+    registration_id,
+    base_url="wss://newsdata.io/ws",  # override for staging / self-hosted / proxied
+    reconnect=True,                   # auto-reconnect on transient drops; default True
+    reconnect_delay=1.0,              # seconds before first reconnect (doubles each retry)
+    reconnect_delay_max=30.0,         # cap on the reconnect delay
+    open_timeout=10.0,                # handshake timeout (None disables)
+    ping_interval=20.0,               # keepalive ping interval (None disables)
+    ping_timeout=20.0,                # wait for ping reply before dropping (None disables)
+    additional_headers={"X-Trace": "abc"},  # extra handshake headers
+    proxy="http://host:port",         # proxy URL
+)
+```
+
 ## Error handling
 
 ```python
@@ -118,7 +183,9 @@ NewsdataException
 │   ├── NewsdataAuthError        (401 / 403)
 │   ├── NewsdataRateLimitError   (429; carries .retry_after)
 │   └── NewsdataServerError      (5xx)
-└── NewsdataNetworkError         (carries .original)
+├── NewsdataNetworkError         (carries .original)
+└── NewsdataWebSocketError       (real-time stream)
+    └── NewsdataWebSocketAuthError  (handshake 401 / 403, or policy-violation close 1008)
 ```
 
 `NewsdataException` is always a valid catch-all.

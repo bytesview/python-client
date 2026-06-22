@@ -44,6 +44,13 @@ classifiers = [
     "Typing :: Typed",
 ]
 
+[project.optional-dependencies]
+# Real-time WebSocket consumer (newsdataapi.NewsDataApiWebSocket). websockets 16
+# requires Python >=3.10, so the extra is gated on that marker; the REST client
+# itself still supports 3.8+ (on 3.8/3.9 the extra installs nothing and the
+# consumer raises a clear "install the websocket extra" error).
+websocket = ["websockets>=16,<17; python_version >= '3.10'"]
+
 [project.urls]
 Homepage = "https://newsdata.io"
 Documentation = "https://newsdata.io/documentation"
@@ -70,6 +77,7 @@ dev = [
     "ruff>=0.6",
     "mypy>=1.10",
     "types-requests",
+    "websockets>=16,<17; python_version >= '3.10'",
 ]
 
 [tool.pytest.ini_options]
@@ -107,3 +115,10 @@ select = [
 python_version = "3.9"
 strict = true
 files = ["src/newsdataapi"]
+
+# websockets is an optional dependency; when it isn't installed (e.g. a Python
+# 3.8/3.9 env, where the extra's marker excludes it) treat the import as
+# untyped rather than a hard error. It ships its own types when present.
+[[tool.mypy.overrides]]
+module = "websockets.*"
+ignore_missing_imports = true
