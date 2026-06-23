@@ -104,8 +104,8 @@ async def _anoop(*_a: object, **_k: object) -> None:
 
 @pytest.fixture(autouse=True)
 def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("newsdataapi.newsdata_websocket.time.sleep", lambda *_a: None)
-    monkeypatch.setattr("newsdataapi.newsdata_websocket.asyncio.sleep", _anoop)
+    monkeypatch.setattr("newsdataapi.websocket.time.sleep", lambda *_a: None)
+    monkeypatch.setattr("newsdataapi.websocket.asyncio.sleep", _anoop)
 
 
 def _collect(ws: NewsDataApiWebSocket, sink: list[str]) -> None:
@@ -120,7 +120,7 @@ def test_url_includes_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT, fake)
     list(NewsDataApiWebSocket("KEY", "REG", reconnect=False))
-    assert fake.urls[0] == "wss://newsdata.io/ws?apikey=KEY&registration_id=REG"
+    assert fake.urls[0] == "wss://newsdata.io/ws/event?apikey=KEY&registration_id=REG"
 
 
 def test_custom_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -159,7 +159,7 @@ def test_connect_params_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_custom_reconnect_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     slept: list[float] = []
     monkeypatch.setattr(
-        "newsdataapi.newsdata_websocket.time.sleep", lambda d: slept.append(d)
+        "newsdataapi.websocket.time.sleep", lambda d: slept.append(d)
     )
     fake = _FakeConnect(
         ([], _closed(1011, "boom")),  # transient -> reconnect after reconnect_delay

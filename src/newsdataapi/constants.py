@@ -24,4 +24,4 @@ DEFAULT_RETRY_BACKOFF_MAX = 60.0      # cap on any single retry sleep
 PAGINATION_DELAY = 1.0                # seconds slept between pages
 
 # Real-time WebSocket endpoint (newsdataapi.NewsDataApiWebSocket).
-WS_BASE_URL = "wss://newsdata.io/ws"
+WS_BASE_URL = "wss://newsdata.io/ws/event"
