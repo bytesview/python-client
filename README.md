@@ -13,7 +13,7 @@
 
 </div>
 
-`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling.
+`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling. It also covers the real-time WebSocket service end to end with `NewsDataApiWebSocket`: register, list, and delete queries, and stream the matching news as it is published (sync or asyncio).
 
 ## Installation
 
@@ -27,7 +27,7 @@ If you use [uv](https://github.com/astral-sh/uv):
 uv add newsdataapi
 ```
 
-Supports Python 3.8 through 3.14. The only runtime dependency is `requests`.
+Supports Python 3.10 through 3.14. The runtime dependencies are `requests` (REST) and `websockets` (real-time streaming).
 
 ## Quickstart
 
@@ -67,7 +67,7 @@ finally:
 | `crypto_count_api(from_date, to_date)` | `/crypto/count` | Aggregate crypto counts |
 | `market_count_api(from_date, to_date)` | `/market/count` | Aggregate market counts |
 
-All endpoint parameters are keyword-only (except the required `from_date` / `to_date` on the count endpoints). Most accept either a single string or a `list[str]`; lists are comma-joined for the API.
+All endpoint parameters are keyword-only (except the required `from_date` / `to_date` on the count endpoints). Most accept either a single string or a `list[str]`; lists are comma-joined for the API. The real-time WebSocket endpoints are covered by `NewsDataApiWebSocket` (see below).
 
 See the [NewsData.io documentation](https://newsdata.io/documentation) — or the [OpenAPI 3.1 spec](https://newsdata.io/openapi.json) — for the full parameter reference.
 
@@ -86,6 +86,83 @@ for page in client.latest_api(q="news", paginate=True, max_pages=5):
 ```
 
 `scroll` and `paginate` are mutually exclusive. `scroll=True` truncates strictly to `max_result`; `paginate=True` stops at `max_pages` or when the API returns no `nextPage`.
+
+## Real-time news (WebSocket)
+
+Register a query first — the returned `registration_id` identifies it from then on:
+
+```python
+from newsdataapi import NewsDataApiClient, NewsDataApiWebSocket
+
+client = NewsDataApiClient("YOUR_API_KEY")
+ws = NewsDataApiWebSocket(client)
+response = ws.websocket_register(q="bitcoin", language="en")
+registration_id = response["results"]["registration_id"]
+```
+
+`websocket_register` accepts the familiar filter parameters (`q`, `country`, `language`, `domain`, …). Registering an identical query twice raises `NewsdataAPIError` with `status_code=409` — the existing id is in `e.response_body["results"]["registration_id"]`. `websocket_fetch()` lists every registered query, and `websocket_delete(registration_id)` removes one.
+
+Then stream — each yielded response has the familiar `status` / `totalResults` / `results` shape:
+
+```python
+for response in ws.stream(registration_id):
+    for article in response["results"]:
+        print(article["title"], "-", article["link"])
+```
+
+Use it as a context manager to close the connection promptly when you stop early (otherwise it closes when iteration ends):
+
+```python
+with NewsDataApiWebSocket(client) as ws:
+    for response in ws.stream(registration_id):
+        print(response["totalResults"])
+        break
+```
+
+Inside asyncio applications use `stream_async()` — the same class, same behavior, awaited iteration:
+
+```python
+import asyncio
+
+async def main():
+    async with NewsDataApiWebSocket(client) as ws:
+        async for response in ws.stream_async(registration_id):
+            for article in response["results"]:
+                print(article["title"], "-", article["link"])
+
+asyncio.run(main())
+```
+
+Transient drops (network errors, server restarts, abnormal closes) are reconnected automatically with a capped exponential backoff. Pass `reconnect=False` to stop on the first disconnect instead. A permanent rejection — bad API key, missing WebSocket entitlement, unknown `registration_id`, device limit reached, or exhausted quota — raises `NewsdataWebSocketAuthError` and is **not** retried:
+
+```python
+from newsdataapi import NewsdataWebSocketAuthError, NewsdataWebSocketError
+
+try:
+    for response in NewsDataApiWebSocket(client).stream(registration_id):
+        ...
+except NewsdataWebSocketAuthError as e:
+    print(f"rejected: {e}")
+except NewsdataWebSocketError as e:
+    print(f"stream error: {e}")
+```
+
+All connection options are keyword-only:
+
+```python
+ws = NewsDataApiWebSocket(
+    client,
+    base_url="wss://ws.newsdata.io/ws/event",  # override for staging / self-hosted / proxied
+    reconnect=True,                   # auto-reconnect on transient drops; default True
+    reconnect_delay=1.0,              # seconds before first reconnect (doubles each retry)
+    reconnect_delay_max=30.0,         # cap on the reconnect delay
+    open_timeout=10.0,                # handshake timeout (None disables)
+    ping_interval=20.0,               # keepalive ping interval (None disables)
+    ping_timeout=20.0,                # wait for ping reply before dropping (None disables)
+    additional_headers={"X-Trace": "abc"},  # extra handshake headers
+    proxy="http://host:port",         # proxy URL
+)
+```
 
 ## Error handling
 
@@ -118,7 +195,9 @@ NewsdataException
 │   ├── NewsdataAuthError        (401 / 403)
 │   ├── NewsdataRateLimitError   (429; carries .retry_after)
 │   └── NewsdataServerError      (5xx)
-└── NewsdataNetworkError         (carries .original)
+├── NewsdataNetworkError         (carries .original)
+└── NewsdataWebSocketError       (real-time stream)
+    └── NewsdataWebSocketAuthError  (handshake 401 / 403, or policy-violation close 1008)
 ```
 
 `NewsdataException` is always a valid catch-all.
@@ -154,7 +233,7 @@ client = NewsDataApiClient(
     pagination_delay=1.0,       # seconds between pages; default 1.0
     max_result=None,            # cap on merged results in scroll mode; default None (no cap)
     max_pages=None,             # cap on pages yielded in paginate mode; default None (no cap)
-    proxies={"https": "..."},   # passed to requests.Session.get
+    proxies={"https": "..."},   # passed with every request
     accept_language="en",       # Accept-Language header
     include_headers=False,      # if True, returned dicts include response_headers
     base_url="...",             # override for staging / proxied environments

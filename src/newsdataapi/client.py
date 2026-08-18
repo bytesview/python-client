@@ -1120,8 +1120,10 @@ class NewsDataApiClient:
         self,
         endpoint: str,
         params: Mapping[str, Any],
+        *,
+        method: str = "GET",
     ) -> dict[str, Any]:
-        """Execute a single GET request, with retries.
+        """Execute a single request (GET by default), with retries.
 
         Returns the parsed JSON body on success. Raises a
         :class:`NewsdataException` subclass on permanent failure.
@@ -1135,8 +1137,9 @@ class NewsDataApiClient:
 
             t0 = time.perf_counter()
             try:
-                logger.info("GET %s", _redact_url(full_url))
-                response = self._session.get(
+                logger.info("%s %s", method, _redact_url(full_url))
+                response = self._session.request(
+                    method,
                     full_url,
                     proxies=self.proxies,
                     timeout=self.request_timeout,

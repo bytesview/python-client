@@ -18,6 +18,7 @@ import responses
 from newsdataapi import (
     NewsDataApiClient,
     NewsdataAPIError,
+    NewsDataApiWebSocket,
     NewsdataAuthError,
     NewsdataException,
     NewsdataNetworkError,
@@ -1266,6 +1267,206 @@ def test_count_endpoint_url_resolves(
     method = getattr(client, method_name)
     method(from_date="2024-01-01", to_date="2024-01-31")
     assert len(mocked_responses.calls) == 1
+
+
+# ===========================================================================
+# WebSocket query management (register / fetch / delete)
+# ===========================================================================
+
+WS_REGISTER_URL = "https://newsdata.io/api/1/websocket/register"
+WS_FETCH_URL = "https://newsdata.io/api/1/websocket/fetch"
+WS_DELETE_URL = "https://newsdata.io/api/1/websocket/delete"
+
+
+def test_websocket_register_posts_query_params(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    """register POSTs, with every param (and the apikey) in the query string."""
+    mocked_responses.post(
+        WS_REGISTER_URL,
+        json={
+            "status": "success",
+            "results": {"message": "registered", "registration_id": "abc123"},
+        },
+        status=200,
+    )
+    response = NewsDataApiWebSocket(client).websocket_register(
+        q="pizza", country=["us", "gb"], image=True
+    )
+    assert response["results"]["registration_id"] == "abc123"
+    sent = mocked_responses.calls[0].request
+    assert sent.url is not None
+    assert "q=pizza" in sent.url
+    assert "country=us%2Cgb" in sent.url
+    assert "image=1" in sent.url
+    assert "apikey=test_key_xxx" in sent.url
+    assert not sent.body  # params travel in the query string, not a body
+
+
+def test_websocket_register_always_sends_news_type_latest(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    mocked_responses.post(
+        WS_REGISTER_URL,
+        json={"status": "success", "results": {"registration_id": "abc"}},
+        status=200,
+    )
+    NewsDataApiWebSocket(client).websocket_register(q="nvidia")
+    sent_url = mocked_responses.calls[0].request.url
+    assert sent_url is not None
+    assert "news_type=latest" in sent_url
+
+
+def test_websocket_register_mutex_validation_applies(
+    client: NewsDataApiClient,
+) -> None:
+    """The shared mutex groups guard register too — no request is sent."""
+    with pytest.raises(NewsdataValidationError):
+        NewsDataApiWebSocket(client).websocket_register(q="a", qInTitle="b")
+
+
+def test_websocket_register_raw_query(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    mocked_responses.post(
+        WS_REGISTER_URL,
+        json={"status": "success", "results": {"registration_id": "abc"}},
+        status=200,
+    )
+    NewsDataApiWebSocket(client).websocket_register(raw_query="q=pizza")
+    sent_url = mocked_responses.calls[0].request.url
+    assert sent_url is not None
+    assert "q=pizza" in sent_url
+    assert "news_type=latest" in sent_url
+
+
+def test_websocket_register_raw_query_rejects_unknown_param(
+    client: NewsDataApiClient,
+) -> None:
+    """size is valid on latest_api but not on websocket/register."""
+    with pytest.raises(NewsdataValidationError):
+        NewsDataApiWebSocket(client).websocket_register(raw_query="q=pizza&size=10")
+
+
+def test_websocket_register_duplicate_409(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    """A duplicate registration raises immediately, carrying the existing id."""
+    mocked_responses.post(
+        WS_REGISTER_URL,
+        json={
+            "status": "error",
+            "results": {
+                "message": "already registered",
+                "code": "Conflict",
+                "registration_id": "existing123",
+            },
+        },
+        status=409,
+    )
+    with pytest.raises(NewsdataAPIError) as exc_info:
+        NewsDataApiWebSocket(client).websocket_register(q="pizza")
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.response_body is not None
+    assert (
+        exc_info.value.response_body["results"]["registration_id"] == "existing123"
+    )
+    assert len(mocked_responses.calls) == 1  # 4xx is never retried
+
+
+def test_websocket_register_403_raises_auth(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    """No WebSocket entitlement on the plan -> NewsdataAuthError."""
+    mocked_responses.post(WS_REGISTER_URL, json={"status": "error"}, status=403)
+    with pytest.raises(NewsdataAuthError):
+        NewsDataApiWebSocket(client).websocket_register(q="pizza")
+
+
+def test_websocket_register_429_exhausts_to_rate_limit(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+    no_sleep: None,
+) -> None:
+    """429 retries with backoff, then raises."""
+    for _ in range(client.max_retries):
+        mocked_responses.post(WS_REGISTER_URL, json={"status": "error"}, status=429)
+    with pytest.raises(NewsdataRateLimitError):
+        NewsDataApiWebSocket(client).websocket_register(q="pizza")
+
+
+def test_websocket_fetch_returns_queries(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    mocked_responses.get(
+        WS_FETCH_URL,
+        json={
+            "status": "success",
+            "totalQueries": 1,
+            "results": {
+                "queries": [
+                    {
+                        "registration_id": "abc123",
+                        "active_clients": 2,
+                        "news_type": "latest",
+                        "query": {"q": "pizza"},
+                    }
+                ]
+            },
+        },
+        status=200,
+    )
+    response = NewsDataApiWebSocket(client).websocket_fetch()
+    assert response["totalQueries"] == 1
+    assert response["results"]["queries"][0]["registration_id"] == "abc123"
+    sent_url = mocked_responses.calls[0].request.url
+    assert sent_url is not None
+    assert "apikey=test_key_xxx" in sent_url
+
+
+def test_websocket_delete_sends_registration_id(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    mocked_responses.delete(
+        WS_DELETE_URL,
+        json={
+            "status": "success",
+            "results": {"message": "deleted", "registration_id": "abc123"},
+        },
+        status=200,
+    )
+    response = NewsDataApiWebSocket(client).websocket_delete("abc123")
+    assert response["results"]["registration_id"] == "abc123"
+    sent_url = mocked_responses.calls[0].request.url
+    assert sent_url is not None
+    assert "registration_id=abc123" in sent_url
+
+
+def test_websocket_delete_unknown_id_404(
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+) -> None:
+    mocked_responses.delete(WS_DELETE_URL, json={"status": "error"}, status=404)
+    with pytest.raises(NewsdataAPIError) as exc_info:
+        NewsDataApiWebSocket(client).websocket_delete("nope")
+    assert exc_info.value.status_code == 404
+
+
+@pytest.mark.parametrize("bad_id", ["", None, 123])
+def test_websocket_delete_rejects_bad_registration_id(
+    client: NewsDataApiClient,
+    bad_id: object,
+) -> None:
+    with pytest.raises(NewsdataValidationError) as exc_info:
+        NewsDataApiWebSocket(client).websocket_delete(bad_id)  # type: ignore[arg-type]
+    assert exc_info.value.param == "registration_id"
 
 
 # ===========================================================================
