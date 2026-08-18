@@ -13,14 +13,13 @@ from .exceptions import (
     NewsdataWebSocketAuthError,
     NewsdataWebSocketError,
 )
-from .websocket import NewsDataApiWebSocket, NewsDataApiWebSocketAsync
+from .websocket import NewsDataApiWebSocket
 
-__version__ = "0.2.3"
+__version__ = "0.3.0"
 
 __all__ = [
     "NewsDataApiClient",
     "NewsDataApiWebSocket",
-    "NewsDataApiWebSocketAsync",
     "NewsdataAPIError",
     "NewsdataAuthError",
     "NewsdataException",

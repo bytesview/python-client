@@ -13,7 +13,7 @@
 
 </div>
 
-`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling. It also includes a real-time WebSocket consumer (`NewsDataApiWebSocket`, plus an async `NewsDataApiWebSocketAsync`) for streaming matched news as it is published.
+`newsdataapi` is the official Python SDK for the [NewsData.io](https://newsdata.io) REST API. It wraps every endpoint (`latest`, `archive`, `sources`, `crypto`, `market`, `count`, `crypto/count`, `market/count`) with consistent retry, pagination, and error handling. It also covers the real-time WebSocket service end to end with `NewsDataApiWebSocket`: register, list, and delete queries, and stream the matching news as it is published (sync or asyncio).
 
 ## Installation
 
@@ -27,13 +27,7 @@ If you use [uv](https://github.com/astral-sh/uv):
 uv add newsdataapi
 ```
 
-For real-time WebSocket streaming, install the optional `websocket` extra (requires Python 3.10+):
-
-```bash
-pip install "newsdataapi[websocket]"
-```
-
-Supports Python 3.8 through 3.14. The only runtime dependency is `requests`; the optional `websocket` extra adds `websockets`.
+Supports Python 3.10 through 3.14. The runtime dependencies are `requests` (REST) and `websockets` (real-time streaming).
 
 ## Quickstart
 
@@ -73,7 +67,7 @@ finally:
 | `crypto_count_api(from_date, to_date)` | `/crypto/count` | Aggregate crypto counts |
 | `market_count_api(from_date, to_date)` | `/market/count` | Aggregate market counts |
 
-All endpoint parameters are keyword-only (except the required `from_date` / `to_date` on the count endpoints). Most accept either a single string or a `list[str]`; lists are comma-joined for the API.
+All endpoint parameters are keyword-only (except the required `from_date` / `to_date` on the count endpoints). Most accept either a single string or a `list[str]`; lists are comma-joined for the API. The real-time WebSocket endpoints are covered by `NewsDataApiWebSocket` (see below).
 
 See the [NewsData.io documentation](https://newsdata.io/documentation) — or the [OpenAPI 3.1 spec](https://newsdata.io/openapi.json) — for the full parameter reference.
 
@@ -95,41 +89,46 @@ for page in client.latest_api(q="news", paginate=True, max_pages=5):
 
 ## Real-time news (WebSocket)
 
-Stream the articles that match a registered percolator query as they are published. This needs the optional `websocket` extra (Python 3.10+):
-
-```bash
-pip install "newsdataapi[websocket]"
-```
-
-Pass your API key and a `registration_id` (the `doc_id` returned when the percolator query was registered), then iterate:
+Register a query first — the returned `registration_id` identifies it from then on:
 
 ```python
-from newsdataapi import NewsDataApiWebSocket
+from newsdataapi import NewsDataApiClient, NewsDataApiWebSocket
 
-ws = NewsDataApiWebSocket(apikey, registration_id)
-for article in ws:                      # or: for article in ws.stream()
-    print(article["title"], "-", article["link"])
+client = NewsDataApiClient("YOUR_API_KEY")
+ws = NewsDataApiWebSocket(client)
+response = ws.websocket_register(q="bitcoin", language="en")
+registration_id = response["results"]["registration_id"]
+```
+
+`websocket_register` accepts the familiar filter parameters (`q`, `country`, `language`, `domain`, …). Registering an identical query twice raises `NewsdataAPIError` with `status_code=409` — the existing id is in `e.response_body["results"]["registration_id"]`. `websocket_fetch()` lists every registered query, and `websocket_delete(registration_id)` removes one.
+
+Then stream — each yielded response has the familiar `status` / `totalResults` / `results` shape:
+
+```python
+for response in ws.stream(registration_id):
+    for article in response["results"]:
+        print(article["title"], "-", article["link"])
 ```
 
 Use it as a context manager to close the connection promptly when you stop early (otherwise it closes when iteration ends):
 
 ```python
-with NewsDataApiWebSocket(apikey, registration_id) as ws:
-    for article in ws:
-        print(article["title"])
+with NewsDataApiWebSocket(client) as ws:
+    for response in ws.stream(registration_id):
+        print(response["totalResults"])
         break
 ```
 
-The same API is available asynchronously as `NewsDataApiWebSocketAsync` (same constructor, same behavior):
+Inside asyncio applications use `stream_async()` — the same class, same behavior, awaited iteration:
 
 ```python
 import asyncio
-from newsdataapi import NewsDataApiWebSocketAsync
 
 async def main():
-    async with NewsDataApiWebSocketAsync(apikey, registration_id) as ws:
-        async for article in ws:           # or: async for article in ws.stream()
-            print(article["title"], "-", article["link"])
+    async with NewsDataApiWebSocket(client) as ws:
+        async for response in ws.stream_async(registration_id):
+            for article in response["results"]:
+                print(article["title"], "-", article["link"])
 
 asyncio.run(main())
 ```
@@ -140,7 +139,7 @@ Transient drops (network errors, server restarts, abnormal closes) are reconnect
 from newsdataapi import NewsdataWebSocketAuthError, NewsdataWebSocketError
 
 try:
-    for article in NewsDataApiWebSocket(apikey, registration_id):
+    for response in NewsDataApiWebSocket(client).stream(registration_id):
         ...
 except NewsdataWebSocketAuthError as e:
     print(f"rejected: {e}")
@@ -152,8 +151,7 @@ All connection options are keyword-only:
 
 ```python
 ws = NewsDataApiWebSocket(
-    apikey,
-    registration_id,
+    client,
     base_url="wss://newsdata.io/ws",  # override for staging / self-hosted / proxied
     reconnect=True,                   # auto-reconnect on transient drops; default True
     reconnect_delay=1.0,              # seconds before first reconnect (doubles each retry)
@@ -235,7 +233,7 @@ client = NewsDataApiClient(
     pagination_delay=1.0,       # seconds between pages; default 1.0
     max_result=None,            # cap on merged results in scroll mode; default None (no cap)
     max_pages=None,             # cap on pages yielded in paginate mode; default None (no cap)
-    proxies={"https": "..."},   # passed to requests.Session.get
+    proxies={"https": "..."},   # passed with every request
     accept_language="en",       # Accept-Language header
     include_headers=False,      # if True, returned dicts include response_headers
     base_url="...",             # override for staging / proxied environments

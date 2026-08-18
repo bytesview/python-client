@@ -1,9 +1,9 @@
-"""Consumers for the NewsData.io real-time WebSocket service.
+"""Real-time WebSocket support for NewsData.io.
 
-:class:`NewsDataApiWebSocket` is synchronous; :class:`NewsDataApiWebSocketAsync`
-is its asyncio counterpart. Both require the optional ``websocket`` extra::
-
-    pip install "newsdataapi[websocket]"
+:class:`NewsDataApiWebSocket` registers / lists / deletes the account's
+real-time queries and streams the responses for a registered query —
+synchronously via ``stream()`` or inside asyncio applications via
+``stream_async()``.
 """
 
 from __future__ import annotations
@@ -14,12 +14,25 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
 
-from . import constants
-from .exceptions import NewsdataWebSocketAuthError, NewsdataWebSocketError
+from websockets.asyncio import client as _asyncio_client
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.sync import client as _sync_client
 
-_POLICY_VIOLATION = 1008      # server close code for auth / quota / device-limit
-_RECONNECT_DELAY = 1.0        # default seconds before the first reconnect; doubles each retry
-_RECONNECT_DELAY_MAX = 30.0   # default cap on the reconnect delay
+from . import constants
+from .client import NewsDataApiClient, _validate_params
+from .exceptions import (
+    NewsdataValidationError,
+    NewsdataWebSocketAuthError,
+    NewsdataWebSocketError,
+)
+
+
+def _check_registration_id(registration_id: str) -> None:
+    if not isinstance(registration_id, str) or not registration_id:
+        raise NewsdataValidationError(
+            "registration_id must be a non-empty string",
+            param="registration_id",
+        )
 
 
 def _permanent_auth_error(exc: Exception) -> NewsdataWebSocketAuthError | None:
@@ -30,15 +43,13 @@ def _permanent_auth_error(exc: Exception) -> NewsdataWebSocketAuthError | None:
     else (other handshake status, other close codes, network ``OSError``) is
     transient.
     """
-    from websockets.exceptions import ConnectionClosedError, InvalidStatus
-
     if isinstance(exc, InvalidStatus):
         if exc.response.status_code in (401, 403):
             return NewsdataWebSocketAuthError("connection rejected")
         return None
     if isinstance(exc, ConnectionClosedError):
         close = exc.rcvd
-        if close is not None and close.code == _POLICY_VIOLATION:
+        if close is not None and close.code == constants.WS_POLICY_VIOLATION:
             return NewsdataWebSocketAuthError(close.reason or "connection rejected")
         return None
     return None
@@ -47,8 +58,6 @@ def _permanent_auth_error(exc: Exception) -> NewsdataWebSocketAuthError | None:
 def _transient_error(exc: Exception) -> NewsdataWebSocketError:
     """Wrap a transient failure as a :class:`NewsdataWebSocketError` (used only
     when ``reconnect=False`` so the caller stops instead of retrying)."""
-    from websockets.exceptions import ConnectionClosedError, InvalidStatus
-
     if isinstance(exc, InvalidStatus):
         return NewsdataWebSocketError(f"handshake failed (HTTP {exc.response.status_code})")
     if isinstance(exc, ConnectionClosedError):
@@ -56,12 +65,51 @@ def _transient_error(exc: Exception) -> NewsdataWebSocketError:
     return NewsdataWebSocketError(f"connection error: {exc}")
 
 
-class _BaseNewsDataApiWebSocket:
-    """Shared configuration for the sync and async WebSocket consumers.
+class NewsDataApiWebSocket:
+    """NewsData.io real-time WebSocket service.
+
+    Registers, lists, and deletes the account's real-time queries
+    (:meth:`websocket_register`, :meth:`websocket_fetch`,
+    :meth:`websocket_delete`) and streams the responses for a registered
+    query (:meth:`stream` / :meth:`stream_async`). The management calls go
+    through the wrapped :class:`~newsdataapi.NewsDataApiClient`::
+
+        client = NewsDataApiClient(apikey)
+        ws = NewsDataApiWebSocket(client)
+
+        response = ws.websocket_register(q="bitcoin")
+        registration_id = response["results"]["registration_id"]
+
+        for response in ws.stream(registration_id):
+            for article in response["results"]:
+                print(article["title"])
+
+    Use it as a context manager to close the connection promptly when you stop
+    early (otherwise it closes when iteration ends or is garbage-collected)::
+
+        with NewsDataApiWebSocket(client) as ws:
+            for response in ws.stream(registration_id):
+                ...
+                break
+
+    Inside asyncio applications use :meth:`stream_async` — the asyncio
+    counterpart of :meth:`stream` — with the async context-manager form::
+
+        async with NewsDataApiWebSocket(client) as ws:
+            async for response in ws.stream_async(registration_id):
+                for article in response["results"]:
+                    print(article["title"])
+
+    Transient drops are reconnected automatically with a capped exponential
+    backoff (pass ``reconnect=False`` to stop on the first disconnect). A
+    permanent rejection (e.g. a bad API key or unknown ``registration_id``)
+    always raises :class:`~newsdataapi.NewsdataWebSocketAuthError` and is
+    never retried.
 
     Args:
-        apikey: Your NewsData.io API key.
-        registration_id: The ``doc_id`` of a registered percolator query.
+        api_client: The :class:`~newsdataapi.NewsDataApiClient` that supplies
+            the API key and performs the management HTTP calls. Not closed by
+            this class.
         base_url: WebSocket endpoint. Defaults to
             :data:`newsdataapi.constants.WS_BASE_URL`; override for staging,
             self-hosted, or proxied environments.
@@ -78,26 +126,25 @@ class _BaseNewsDataApiWebSocket:
         ping_timeout: Seconds to wait for a ping reply before considering the
             connection dead (``None`` disables).
         additional_headers: Extra HTTP headers for the opening handshake.
-        proxy: Proxy URL for the connection (e.g. ``"http://host:port"``).
+        proxy: Proxy URL for the WebSocket connection
+            (e.g. ``"http://host:port"``).
     """
 
     def __init__(
         self,
-        apikey: str,
-        registration_id: str,
+        api_client: NewsDataApiClient,
         *,
         base_url: str = constants.WS_BASE_URL,
         reconnect: bool = True,
-        reconnect_delay: float = _RECONNECT_DELAY,
-        reconnect_delay_max: float = _RECONNECT_DELAY_MAX,
+        reconnect_delay: float = constants.WS_RECONNECT_DELAY,
+        reconnect_delay_max: float = constants.WS_RECONNECT_DELAY_MAX,
         open_timeout: float | None = 10.0,
         ping_interval: float | None = 20.0,
         ping_timeout: float | None = 20.0,
         additional_headers: dict[str, str] | None = None,
         proxy: str | None = None,
     ) -> None:
-        self._apikey = apikey
-        self._registration_id = registration_id
+        self.api_client = api_client
         self._base_url = base_url
         self._reconnect = reconnect
         self._reconnect_delay = reconnect_delay
@@ -107,13 +154,105 @@ class _BaseNewsDataApiWebSocket:
         self._ping_timeout = ping_timeout
         self._additional_headers = additional_headers
         self._proxy = proxy
-        self._ws: Any = None  # the live connection, while one is open
+        self._ws_sync: Any = None   # the live sync connection, while one is open
+        self._ws_async: Any = None  # the live async connection, while one is open
 
-    @property
-    def _url(self) -> str:
+    # ---- query management -------------------------------------------------
+
+    def websocket_register(
+        self,
+        *,
+        q: str | None = None,
+        qInTitle: str | None = None,
+        qInMeta: str | None = None,
+        country: str | list[str] | None = None,
+        excludecountry: str | list[str] | None = None,
+        category: str | list[str] | None = None,
+        excludecategory: str | list[str] | None = None,
+        language: str | list[str] | None = None,
+        excludelanguage: str | list[str] | None = None,
+        domain: str | list[str] | None = None,
+        domainurl: str | list[str] | None = None,
+        excludedomain: str | list[str] | None = None,
+        prioritydomain: str | None = None,
+        timezone: str | None = None,
+        full_content: bool | None = None,
+        image: bool | None = None,
+        video: bool | None = None,
+        removeduplicate: bool | None = None,
+        tag: str | list[str] | None = None,
+        sentiment: str | None = None,
+        sentiment_score: float | None = None,
+        region: str | list[str] | None = None,
+        organization: str | list[str] | None = None,
+        creator: str | list[str] | None = None,
+        datatype: str | list[str] | None = None,
+        excludefield: str | list[str] | None = None,
+        raw_query: str | None = None,
+    ) -> dict[str, Any]:
+        """Register a real-time WebSocket query.
+
+        See https://newsdata.io/documentation for parameter descriptions.
+        The new query's ``registration_id`` is in ``response["results"]``.
+        """
+        params = _validate_params(
+            {
+                "q": q,
+                "qInTitle": qInTitle,
+                "qInMeta": qInMeta,
+                "country": country,
+                "excludecountry": excludecountry,
+                "category": category,
+                "excludecategory": excludecategory,
+                "language": language,
+                "excludelanguage": excludelanguage,
+                "domain": domain,
+                "domainurl": domainurl,
+                "excludedomain": excludedomain,
+                "prioritydomain": prioritydomain,
+                "timezone": timezone,
+                "full_content": full_content,
+                "image": image,
+                "video": video,
+                "removeduplicate": removeduplicate,
+                "tag": tag,
+                "sentiment": sentiment,
+                "sentiment_score": sentiment_score,
+                "region": region,
+                "organization": organization,
+                "creator": creator,
+                "datatype": datatype,
+                "excludefield": excludefield,
+                "raw_query": raw_query,
+            }
+        )
+        params["news_type"] = constants.WS_NEWS_TYPE
+        return self.api_client._request(
+            constants.WEBSOCKET_REGISTER_ENDPOINT, params, method="POST"
+        )
+
+    def websocket_fetch(self) -> dict[str, Any]:
+        """List the registered WebSocket queries.
+
+        ``response["results"]["queries"]`` holds one entry per query.
+        """
+        return self.api_client._request(constants.WEBSOCKET_FETCH_ENDPOINT, {})
+
+    def websocket_delete(self, registration_id: str) -> dict[str, Any]:
+        """Delete the registered WebSocket query with ``registration_id``."""
+        _check_registration_id(registration_id)
+        return self.api_client._request(
+            constants.WEBSOCKET_DELETE_ENDPOINT,
+            {"registration_id": registration_id},
+            method="DELETE",
+        )
+
+    # ---- streaming --------------------------------------------------------
+
+    def _url(self, registration_id: str) -> str:
         return (
-            f"{self._base_url}?apikey={self._apikey}"
-            f"&registration_id={self._registration_id}"
+            f"{self._base_url}?apikey={self.api_client._apikey}"
+            f"&registration_id={registration_id}"
         )
 
     def _connect_kwargs(self) -> dict[str, Any]:
@@ -128,58 +267,26 @@ class _BaseNewsDataApiWebSocket:
     def _next_delay(self, delay: float) -> float:
         return min(delay * 2, self._reconnect_delay_max)
 
-
-class NewsDataApiWebSocket(_BaseNewsDataApiWebSocket):
-    """Synchronous consumer of the real-time WebSocket service.
-
-    ``registration_id`` is the ``doc_id`` returned when the query was
-    registered. Call :meth:`stream` (or iterate the object directly) to
-    receive matched articles as they arrive::
-
-        ws = NewsDataApiWebSocket(apikey, registration_id)
-        for article in ws.stream():        # or: for article in ws
-            print(article["title"])
-
-    Use it as a context manager to close the connection promptly when you stop
-    early (otherwise it closes when iteration ends or is garbage-collected)::
-
-        with NewsDataApiWebSocket(apikey, registration_id) as ws:
-            for article in ws:
-                ...
-                break
-
-    Transient drops are reconnected automatically with a capped exponential
-    backoff (pass ``reconnect=False`` to stop on the first disconnect). A
-    permanent rejection (bad key, missing entitlement, unknown
-    ``registration_id``, device limit, or exhausted quota) always raises
-    :class:`~newsdataapi.NewsdataWebSocketAuthError` and is never retried. See
-    :class:`_BaseNewsDataApiWebSocket` for the full constructor signature.
-    """
-
-    def stream(self) -> Iterator[dict[str, Any]]:
-        """Connect and yield matched articles as they arrive.
-
-        This is the same as iterating the object directly
-        (``for article in ws``).
-        """
-        try:
-            from websockets.exceptions import ConnectionClosedError, InvalidStatus
-            from websockets.sync.client import connect
-        except ImportError as exc:
-            raise NewsdataWebSocketError(
-                "the websocket extra is required: "
-                "pip install 'newsdataapi[websocket]'"
-            ) from exc
-
+    def stream(self, registration_id: str) -> Iterator[dict[str, Any]]:
+        """Connect and yield each response for ``registration_id`` as it
+        arrives. Responses have the familiar ``status`` / ``totalResults`` /
+        ``results`` shape."""
+        _check_registration_id(registration_id)
         delay = self._reconnect_delay
         while True:
             try:
-                with connect(self._url, **self._connect_kwargs()) as websocket:
-                    self._ws = websocket
+                with _sync_client.connect(
+                    self._url(registration_id), **self._connect_kwargs()
+                ) as websocket:
+                    self._ws_sync = websocket
                     delay = self._reconnect_delay  # reset after a successful connect
                     for message in websocket:
-                        event = json.loads(message)
-                        yield from event.get("items", [])
+                        try:
+                            response = json.loads(message)
+                        except ValueError:
+                            continue  # skip malformed frames
+                        if isinstance(response, dict):
+                            yield response
             except (InvalidStatus, ConnectionClosedError, OSError) as exc:
                 auth = _permanent_auth_error(exc)
                 if auth is not None:
@@ -194,66 +301,24 @@ class NewsDataApiWebSocket(_BaseNewsDataApiWebSocket):
             time.sleep(delay)
             delay = self._next_delay(delay)
 
-    def __iter__(self) -> Iterator[dict[str, Any]]:
-        return self.stream()
-
-    def __enter__(self) -> NewsDataApiWebSocket:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        # Close the active connection promptly (e.g. after an early break).
-        if self._ws is not None:
-            self._ws.close()
-            self._ws = None
-
-
-class NewsDataApiWebSocketAsync(_BaseNewsDataApiWebSocket):
-    """Asyncio consumer of the real-time WebSocket service.
-
-    The async counterpart of :class:`NewsDataApiWebSocket`. Call :meth:`stream`
-    (or iterate the object directly) to receive matched articles::
-
-        ws = NewsDataApiWebSocketAsync(apikey, registration_id)
-        async for article in ws:           # or: async for article in ws.stream()
-            print(article["title"])
-
-    Use it as an async context manager to close the connection promptly when
-    you stop early::
-
-        async with NewsDataApiWebSocketAsync(apikey, registration_id) as ws:
-            async for article in ws:
-                ...
-                break
-
-    Reconnect and error semantics match the synchronous class; see
-    :class:`_BaseNewsDataApiWebSocket` for the full constructor signature.
-    """
-
-    async def stream(self) -> AsyncIterator[dict[str, Any]]:
-        """Connect and yield matched articles as they arrive.
-
-        This is the same as iterating the object directly
-        (``async for article in ws``).
-        """
-        try:
-            from websockets.asyncio.client import connect
-            from websockets.exceptions import ConnectionClosedError, InvalidStatus
-        except ImportError as exc:
-            raise NewsdataWebSocketError(
-                "the websocket extra is required: "
-                "pip install 'newsdataapi[websocket]'"
-            ) from exc
-
+    async def stream_async(self, registration_id: str) -> AsyncIterator[dict[str, Any]]:
+        """Asyncio counterpart of :meth:`stream`."""
+        _check_registration_id(registration_id)
         delay = self._reconnect_delay
         while True:
             try:
-                async with connect(self._url, **self._connect_kwargs()) as websocket:
-                    self._ws = websocket
+                async with _asyncio_client.connect(
+                    self._url(registration_id), **self._connect_kwargs()
+                ) as websocket:
+                    self._ws_async = websocket
                     delay = self._reconnect_delay  # reset after a successful connect
                     async for message in websocket:
-                        event = json.loads(message)
-                        for article in event.get("items", []):
-                            yield article
+                        try:
+                            response = json.loads(message)
+                        except ValueError:
+                            continue  # skip malformed frames
+                        if isinstance(response, dict):
+                            yield response
             except (InvalidStatus, ConnectionClosedError, OSError) as exc:
                 auth = _permanent_auth_error(exc)
                 if auth is not None:
@@ -266,13 +331,20 @@ class NewsDataApiWebSocketAsync(_BaseNewsDataApiWebSocket):
             await asyncio.sleep(delay)
             delay = self._next_delay(delay)
 
-    def __aiter__(self) -> AsyncIterator[dict[str, Any]]:
-        return self.stream()
+    def __enter__(self) -> NewsDataApiWebSocket:
+        return self
 
-    async def __aenter__(self) -> NewsDataApiWebSocketAsync:
+    def __exit__(self, *exc: object) -> None:
+        # Close the active sync connection promptly (e.g. after an early break).
+        if self._ws_sync is not None:
+            self._ws_sync.close()
+            self._ws_sync = None
+
+    async def __aenter__(self) -> NewsDataApiWebSocket:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        if self._ws is not None:
-            await self._ws.close()
-            self._ws = None
+        # Close the active async connection promptly (e.g. after an early break).
+        if self._ws_async is not None:
+            await self._ws_async.close()
+            self._ws_async = None

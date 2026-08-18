@@ -1,9 +1,8 @@
-"""Mocked unit tests for the sync and async WebSocket consumers.
+"""Mocked unit tests for both stream modes of NewsDataApiWebSocket.
 
 Patch ``websockets.sync.client.connect`` / ``websockets.asyncio.client.connect``
-with a scripted fake. Skipped when ``websockets`` is not installed (e.g. Python
-3.8/3.9 without the extra). Async tests drive the coroutines with
-``asyncio.run`` so no ``pytest-asyncio`` plugin is needed.
+with a scripted fake. Async tests drive the coroutines with ``asyncio.run`` so
+no ``pytest-asyncio`` plugin is needed.
 """
 
 from __future__ import annotations
@@ -12,17 +11,15 @@ import asyncio
 import json
 
 import pytest
+from websockets.datastructures import Headers
+from websockets.exceptions import ConnectionClosedError, InvalidStatus
+from websockets.frames import Close
+from websockets.http11 import Response
 
-pytest.importorskip("websockets")
-
-from websockets.datastructures import Headers  # noqa: E402
-from websockets.exceptions import ConnectionClosedError, InvalidStatus  # noqa: E402
-from websockets.frames import Close  # noqa: E402
-from websockets.http11 import Response  # noqa: E402
-
-from newsdataapi import (  # noqa: E402
+from newsdataapi import (
+    NewsDataApiClient,
     NewsDataApiWebSocket,
-    NewsDataApiWebSocketAsync,
+    NewsdataValidationError,
     NewsdataWebSocketAuthError,
     NewsdataWebSocketError,
 )
@@ -32,7 +29,14 @@ CONNECT_ASYNC = "websockets.asyncio.client.connect"
 
 
 def _news(*titles: str) -> str:
-    return json.dumps({"type": "news", "items": [{"title": t} for t in titles]})
+    """One server frame, shaped exactly like the live dispatcher's payload."""
+    return json.dumps(
+        {
+            "status": "success",
+            "totalResults": len(titles),
+            "results": [{"title": t} for t in titles],
+        }
+    )
 
 
 def _closed(code: int, reason: str = "") -> ConnectionClosedError:
@@ -108,9 +112,13 @@ def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("newsdataapi.websocket.asyncio.sleep", _anoop)
 
 
-def _collect(ws: NewsDataApiWebSocket, sink: list[str]) -> None:
-    for article in ws:
-        sink.append(article["title"])
+def _ws(apikey: str = "k", **kwargs: object) -> NewsDataApiWebSocket:
+    return NewsDataApiWebSocket(NewsDataApiClient(apikey), **kwargs)
+
+
+def _collect(ws: NewsDataApiWebSocket, sink: list[str], registration_id: str = "r") -> None:
+    for response in ws.stream(registration_id):
+        sink.extend(article["title"] for article in response["results"])
 
 
 # --- basics -----------------------------------------------------------------
@@ -119,17 +127,15 @@ def _collect(ws: NewsDataApiWebSocket, sink: list[str]) -> None:
 def test_url_includes_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT, fake)
-    list(NewsDataApiWebSocket("KEY", "REG", reconnect=False))
+    list(_ws("KEY", reconnect=False).stream("REG"))
     assert fake.urls[0] == "wss://newsdata.io/ws/event?apikey=KEY&registration_id=REG"
 
 
 def test_custom_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT, fake)
-    ws = NewsDataApiWebSocket(
-        "KEY", "REG", base_url="wss://staging.example/ws", reconnect=False
-    )
-    list(ws)
+    ws = _ws("KEY", base_url="wss://staging.example/ws", reconnect=False)
+    list(ws.stream("REG"))
     assert fake.urls[0] == "wss://staging.example/ws?apikey=KEY&registration_id=REG"
 
 
@@ -137,9 +143,7 @@ def test_connect_params_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT, fake)
     headers = {"X-Trace": "1"}
-    ws = NewsDataApiWebSocket(
-        "k",
-        "r",
+    ws = _ws(
         reconnect=False,
         open_timeout=5.0,
         ping_interval=7.0,
@@ -147,7 +151,7 @@ def test_connect_params_passed_through(monkeypatch: pytest.MonkeyPatch) -> None:
         additional_headers=headers,
         proxy="http://proxy:3128",
     )
-    list(ws)
+    list(ws.stream("r"))
     kw = fake.kwargs[0]
     assert kw["open_timeout"] == 5.0
     assert kw["ping_interval"] == 7.0
@@ -166,35 +170,39 @@ def test_custom_reconnect_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
         ([_news("A")], _closed(1008, "stop")),  # permanent -> raise
     )
     monkeypatch.setattr(CONNECT, fake)
-    ws = NewsDataApiWebSocket(
-        "k", "r", reconnect_delay=2.5, reconnect_delay_max=99.0
-    )
+    ws = _ws(reconnect_delay=2.5, reconnect_delay_max=99.0)
     with pytest.raises(NewsdataWebSocketAuthError):
-        list(ws)
+        list(ws.stream("r"))
     assert slept == [2.5]  # used the configured base delay
 
 
-def test_yields_flattened_articles(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_yields_whole_server_responses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT, _FakeConnect(([_news("A", "B"), _news("C")], None)))
-    assert [a["title"] for a in NewsDataApiWebSocket("k", "r", reconnect=False)] == [
-        "A",
-        "B",
-        "C",
-    ]
+    got = list(_ws(reconnect=False).stream("r"))
+    assert [r["status"] for r in got] == ["success", "success"]
+    assert [r["totalResults"] for r in got] == [2, 1]
+    assert [[a["title"] for a in r["results"]] for r in got] == [["A", "B"], ["C"]]
 
 
-def test_stream_method_matches_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(CONNECT, _FakeConnect(([_news("A", "B")], None)))
-    ws = NewsDataApiWebSocket("k", "r", reconnect=False)
-    assert [a["title"] for a in ws.stream()] == ["A", "B"]
+def test_malformed_frames_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    frames = ["not json", json.dumps(["not", "a", "dict"]), _news("A")]
+    monkeypatch.setattr(CONNECT, _FakeConnect((frames, None)))
+    got = list(_ws(reconnect=False).stream("r"))
+    assert [r["totalResults"] for r in got] == [1]
+
+
+@pytest.mark.parametrize("bad_id", ["", None, 123])
+def test_stream_rejects_bad_registration_id(bad_id: object) -> None:
+    with pytest.raises(NewsdataValidationError) as exc_info:
+        next(_ws().stream(bad_id))  # type: ignore[arg-type]
+    assert exc_info.value.param == "registration_id"
 
 
 # --- context manager: prompt close on early break ---------------------------
 
 
-def test_context_manager_returns_self(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(CONNECT, _FakeConnect(([_news("A")], None)))
-    ws = NewsDataApiWebSocket("k", "r", reconnect=False)
+def test_context_manager_returns_self() -> None:
+    ws = _ws(reconnect=False)
     with ws as entered:
         assert entered is ws
 
@@ -202,24 +210,12 @@ def test_context_manager_returns_self(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_context_manager_closes_on_break(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([_news("A"), _news("B")], None))
     monkeypatch.setattr(CONNECT, fake)
-    ws = NewsDataApiWebSocket("k", "r", reconnect=False)
+    ws = _ws(reconnect=False)
     with ws:
-        for _article in ws:
+        for _article in ws.stream("r"):
             break
     assert fake.conns[0].closed is True  # closed promptly on context exit
     assert fake.calls == 1
-
-
-def test_context_manager_closes_stream_method_too(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _FakeConnect(([_news("A"), _news("B")], None))
-    monkeypatch.setattr(CONNECT, fake)
-    ws = NewsDataApiWebSocket("k", "r", reconnect=False)
-    with ws:
-        for _article in ws.stream():
-            break
-    assert fake.conns[0].closed is True
 
 
 # --- permanent rejection: never retried, even with reconnect=True -----------
@@ -229,7 +225,7 @@ def test_handshake_403_raises_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([], _invalid_status(403)))
     monkeypatch.setattr(CONNECT, fake)
     with pytest.raises(NewsdataWebSocketAuthError):
-        list(NewsDataApiWebSocket("k", "r"))  # reconnect=True default
+        list(_ws().stream("r"))  # reconnect=True default
     assert fake.calls == 1
 
 
@@ -238,7 +234,7 @@ def test_close_1008_raises_auth_with_reason(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError, match="device limit"):
-        _collect(NewsDataApiWebSocket("k", "r"), got)
+        _collect(_ws(), got)
     assert got == ["A"]
     assert fake.calls == 1
 
@@ -250,7 +246,7 @@ def test_no_reconnect_normal_close_ends(monkeypatch: pytest.MonkeyPatch) -> None
     fake = _FakeConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
-    _collect(NewsDataApiWebSocket("k", "r", reconnect=False), got)
+    _collect(_ws(reconnect=False), got)
     assert got == ["A"]
     assert fake.calls == 1
 
@@ -260,7 +256,7 @@ def test_no_reconnect_abnormal_close_raises(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketError) as exc_info:
-        _collect(NewsDataApiWebSocket("k", "r", reconnect=False), got)
+        _collect(_ws(reconnect=False), got)
     assert not isinstance(exc_info.value, NewsdataWebSocketAuthError)
     assert got == ["A"]
     assert fake.calls == 1
@@ -269,7 +265,7 @@ def test_no_reconnect_abnormal_close_raises(monkeypatch: pytest.MonkeyPatch) -> 
 def test_no_reconnect_handshake_5xx_raises(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT, _FakeConnect(([], _invalid_status(503))))
     with pytest.raises(NewsdataWebSocketError) as exc_info:
-        list(NewsDataApiWebSocket("k", "r", reconnect=False))
+        list(_ws(reconnect=False).stream("r"))
     assert not isinstance(exc_info.value, NewsdataWebSocketAuthError)
 
 
@@ -284,7 +280,7 @@ def test_reconnects_on_transient_close(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError):
-        _collect(NewsDataApiWebSocket("k", "r"), got)
+        _collect(_ws(), got)
     assert got == ["A", "B"]
     assert fake.calls == 2
 
@@ -297,7 +293,7 @@ def test_reconnects_on_normal_close(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError):
-        _collect(NewsDataApiWebSocket("k", "r"), got)
+        _collect(_ws(), got)
     assert got == ["A", "B"]
     assert fake.calls == 2
 
@@ -310,7 +306,7 @@ def test_reconnects_on_handshake_5xx(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError):
-        _collect(NewsDataApiWebSocket("k", "r"), got)
+        _collect(_ws(), got)
     assert got == ["A"]
     assert fake.calls == 2
 
@@ -323,21 +319,13 @@ def test_reconnects_on_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError):
-        _collect(NewsDataApiWebSocket("k", "r"), got)
+        _collect(_ws(), got)
     assert got == ["A"]
     assert fake.calls == 2
 
 
-def test_missing_websockets_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-
-    monkeypatch.setitem(sys.modules, "websockets.sync.client", None)
-    with pytest.raises(NewsdataWebSocketError, match="pip install"):
-        list(NewsDataApiWebSocket("k", "r"))
-
-
 # ===========================================================================
-# Async consumer (NewsDataApiWebSocketAsync)
+# Async streaming (NewsDataApiWebSocket.stream_async)
 # ===========================================================================
 
 
@@ -411,21 +399,25 @@ class _FakeAsyncConnect:
         return _FakeAsyncCM(conn, None)
 
 
-def _atitles(ws: NewsDataApiWebSocketAsync) -> list[str]:
+def _atitles(ws: NewsDataApiWebSocket, registration_id: str = "r") -> list[str]:
     """Fully consume the async stream and return article titles."""
 
     async def go() -> list[str]:
-        return [article["title"] async for article in ws]
+        return [
+            article["title"]
+            async for response in ws.stream_async(registration_id)
+            for article in response["results"]
+        ]
 
     return asyncio.run(go())
 
 
-def _acollect(ws: NewsDataApiWebSocketAsync, sink: list[str]) -> None:
+def _acollect(ws: NewsDataApiWebSocket, sink: list[str], registration_id: str = "r") -> None:
     """Consume into ``sink`` so partial results survive a raised exception."""
 
     async def go() -> None:
-        async for article in ws:
-            sink.append(article["title"])
+        async for response in ws.stream_async(registration_id):
+            sink.extend(article["title"] for article in response["results"])
 
     asyncio.run(go())
 
@@ -437,35 +429,36 @@ def test_async_url_and_params(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeAsyncConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT_ASYNC, fake)
     headers = {"X-Trace": "1"}
-    ws = NewsDataApiWebSocketAsync(
+    ws = _ws(
         "KEY",
-        "REG",
         base_url="wss://staging.example/ws",
         reconnect=False,
         open_timeout=5.0,
         additional_headers=headers,
         proxy="http://proxy:3128",
     )
-    _atitles(ws)
+    _atitles(ws, "REG")
     assert fake.urls[0] == "wss://staging.example/ws?apikey=KEY&registration_id=REG"
     assert fake.kwargs[0]["open_timeout"] == 5.0
     assert fake.kwargs[0]["additional_headers"] == headers
     assert fake.kwargs[0]["proxy"] == "http://proxy:3128"
 
 
-def test_async_yields_flattened_articles(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_async_yields_whole_server_responses(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(CONNECT_ASYNC, _FakeAsyncConnect(([_news("A", "B"), _news("C")], None)))
-    assert _atitles(NewsDataApiWebSocketAsync("k", "r", reconnect=False)) == ["A", "B", "C"]
+
+    async def go() -> list[dict]:
+        return [r async for r in _ws(reconnect=False).stream_async("r")]
+
+    got = asyncio.run(go())
+    assert [r["totalResults"] for r in got] == [2, 1]
+    assert [[a["title"] for a in r["results"]] for r in got] == [["A", "B"], ["C"]]
 
 
-def test_async_stream_method_matches_iteration(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(CONNECT_ASYNC, _FakeAsyncConnect(([_news("A", "B")], None)))
-    ws = NewsDataApiWebSocketAsync("k", "r", reconnect=False)
-
-    async def go() -> list[str]:
-        return [a["title"] async for a in ws.stream()]
-
-    assert asyncio.run(go()) == ["A", "B"]
+def test_async_malformed_frames_are_skipped(monkeypatch: pytest.MonkeyPatch) -> None:
+    frames = ["not json", json.dumps(["not", "a", "dict"]), _news("A")]
+    monkeypatch.setattr(CONNECT_ASYNC, _FakeAsyncConnect((frames, None)))
+    assert _atitles(_ws(reconnect=False)) == ["A"]
 
 
 # --- context manager --------------------------------------------------------
@@ -476,9 +469,9 @@ def test_async_context_manager_closes_on_break(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr(CONNECT_ASYNC, fake)
 
     async def go() -> None:
-        ws = NewsDataApiWebSocketAsync("k", "r", reconnect=False)
+        ws = _ws(reconnect=False)
         async with ws:
-            agen = ws.stream()
+            agen = ws.stream_async("r")
             async for _article in agen:
                 break
             await agen.aclose()  # close the suspended generator within the loop
@@ -495,7 +488,7 @@ def test_async_handshake_403_raises_auth(monkeypatch: pytest.MonkeyPatch) -> Non
     fake = _FakeAsyncConnect(([], _invalid_status(403)))
     monkeypatch.setattr(CONNECT_ASYNC, fake)
     with pytest.raises(NewsdataWebSocketAuthError):
-        _atitles(NewsDataApiWebSocketAsync("k", "r"))  # reconnect=True default
+        _atitles(_ws())  # reconnect=True default
     assert fake.calls == 1
 
 
@@ -504,7 +497,7 @@ def test_async_close_1008_raises_auth_with_reason(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(CONNECT_ASYNC, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError, match="device limit"):
-        _acollect(NewsDataApiWebSocketAsync("k", "r"), got)
+        _acollect(_ws(), got)
     assert got == ["A"]
     assert fake.calls == 1
 
@@ -517,7 +510,7 @@ def test_async_no_reconnect_abnormal_close_raises(monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(CONNECT_ASYNC, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketError) as exc_info:
-        _acollect(NewsDataApiWebSocketAsync("k", "r", reconnect=False), got)
+        _acollect(_ws(reconnect=False), got)
     assert not isinstance(exc_info.value, NewsdataWebSocketAuthError)
     assert got == ["A"]
 
@@ -533,7 +526,7 @@ def test_async_reconnects_on_transient_close(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr(CONNECT_ASYNC, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError):
-        _acollect(NewsDataApiWebSocketAsync("k", "r"), got)
+        _acollect(_ws(), got)
     assert got == ["A", "B"]
     assert fake.calls == 2
 
@@ -546,14 +539,6 @@ def test_async_reconnects_on_network_error(monkeypatch: pytest.MonkeyPatch) -> N
     monkeypatch.setattr(CONNECT_ASYNC, fake)
     got: list[str] = []
     with pytest.raises(NewsdataWebSocketAuthError):
-        _acollect(NewsDataApiWebSocketAsync("k", "r"), got)
+        _acollect(_ws(), got)
     assert got == ["A"]
     assert fake.calls == 2
-
-
-def test_async_missing_websockets_dependency(monkeypatch: pytest.MonkeyPatch) -> None:
-    import sys
-
-    monkeypatch.setitem(sys.modules, "websockets.asyncio.client", None)
-    with pytest.raises(NewsdataWebSocketError, match="pip install"):
-        _atitles(NewsDataApiWebSocketAsync("k", "r"))
