@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import AsyncIterator, Iterator
 from typing import Any
@@ -19,12 +20,14 @@ from websockets.exceptions import ConnectionClosedError, InvalidStatus
 from websockets.sync import client as _sync_client
 
 from . import constants
-from .client import NewsDataApiClient, _validate_params
+from .client import NewsDataApiClient, _redact_url, _validate_params
 from .exceptions import (
     NewsdataValidationError,
     NewsdataWebSocketAuthError,
     NewsdataWebSocketError,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _check_registration_id(registration_id: str) -> None:
@@ -272,13 +275,13 @@ class NewsDataApiWebSocket:
         arrives. Responses have the familiar ``status`` / ``totalResults`` /
         ``results`` shape."""
         _check_registration_id(registration_id)
+        url = self._url(registration_id)
         delay = self._reconnect_delay
         while True:
             try:
-                with _sync_client.connect(
-                    self._url(registration_id), **self._connect_kwargs()
-                ) as websocket:
+                with _sync_client.connect(url, **self._connect_kwargs()) as websocket:
                     self._ws_sync = websocket
+                    logger.info("connected to %s", _redact_url(url))
                     delay = self._reconnect_delay  # reset after a successful connect
                     for message in websocket:
                         try:
@@ -293,6 +296,9 @@ class NewsDataApiWebSocket:
                     raise auth from exc
                 if not self._reconnect:
                     raise _transient_error(exc) from exc
+                logger.warning(
+                    "connection failed (%s); reconnecting in %.1fs", exc, delay
+                )
             else:
                 if not self._reconnect:
                     return  # normal close, reconnect disabled
@@ -304,13 +310,15 @@ class NewsDataApiWebSocket:
     async def stream_async(self, registration_id: str) -> AsyncIterator[dict[str, Any]]:
         """Asyncio counterpart of :meth:`stream`."""
         _check_registration_id(registration_id)
+        url = self._url(registration_id)
         delay = self._reconnect_delay
         while True:
             try:
                 async with _asyncio_client.connect(
-                    self._url(registration_id), **self._connect_kwargs()
+                    url, **self._connect_kwargs()
                 ) as websocket:
                     self._ws_async = websocket
+                    logger.info("connected to %s", _redact_url(url))
                     delay = self._reconnect_delay  # reset after a successful connect
                     async for message in websocket:
                         try:
@@ -325,6 +333,9 @@ class NewsDataApiWebSocket:
                     raise auth from exc
                 if not self._reconnect:
                     raise _transient_error(exc) from exc
+                logger.warning(
+                    "connection failed (%s); reconnecting in %.1fs", exc, delay
+                )
             else:
                 if not self._reconnect:
                     return  # normal close, reconnect disabled

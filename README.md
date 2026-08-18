@@ -152,7 +152,7 @@ All connection options are keyword-only:
 ```python
 ws = NewsDataApiWebSocket(
     client,
-    base_url="wss://newsdata.io/ws",  # override for staging / self-hosted / proxied
+    base_url="wss://ws.newsdata.io/ws/event",  # override for staging / self-hosted / proxied
     reconnect=True,                   # auto-reconnect on transient drops; default True
     reconnect_delay=1.0,              # seconds before first reconnect (doubles each retry)
     reconnect_delay_max=30.0,         # cap on the reconnect delay

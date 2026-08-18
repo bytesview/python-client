@@ -128,7 +128,7 @@ def test_url_includes_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     fake = _FakeConnect(([_news("A")], None))
     monkeypatch.setattr(CONNECT, fake)
     list(_ws("KEY", reconnect=False).stream("REG"))
-    assert fake.urls[0] == "wss://newsdata.io/ws/event?apikey=KEY&registration_id=REG"
+    assert fake.urls[0] == "wss://ws.newsdata.io/ws/event?apikey=KEY&registration_id=REG"
 
 
 def test_custom_base_url(monkeypatch: pytest.MonkeyPatch) -> None:
