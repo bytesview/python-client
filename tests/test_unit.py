@@ -823,6 +823,22 @@ def test_429_exhausted_raises_rate_limit_with_retry_after(
     assert exc_info.value.retry_after == 5
 
 
+@pytest.mark.parametrize("code", ["ApiKeyLimitExceeded", "ApiLimitExceeded"])
+def test_429_quota_exhausted_raises_without_retry(
+    code: str,
+    client: NewsDataApiClient,
+    mocked_responses: responses.RequestsMock,
+    no_sleep: None,
+) -> None:
+    """A 429 whose error code means exhausted credits is never retried."""
+    body = {"status": "error", "results": {"message": "limit", "code": code}}
+    mocked_responses.get(LATEST_URL, json=body, status=429)
+    with pytest.raises(NewsdataRateLimitError) as exc_info:
+        client.latest_api()
+    assert len(mocked_responses.calls) == 1
+    assert exc_info.value.response_body == body
+
+
 def test_500_then_200_succeeds(
     client: NewsDataApiClient,
     mocked_responses: responses.RequestsMock,
