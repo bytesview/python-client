@@ -84,6 +84,8 @@ _MUTEX_GROUPS: tuple[tuple[str, ...], ...] = (
     ("domain", "domainurl", "excludedomain"),
 )
 
+_QUOTA_EXHAUSTED_CODES = frozenset({"ApiKeyLimitExceeded", "ApiLimitExceeded"})
+
 
 def _validate_params(user_params: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and normalize user-provided endpoint parameters.
@@ -296,6 +298,17 @@ def _parse_retry_after(value: str | None) -> int | None:
         return max(int(delta_seconds), 0)
     except (TypeError, ValueError, AttributeError):
         return None
+
+
+def _extract_error_code(body: Any) -> str | None:
+    """Return the API error code from an error response body, if present."""
+    if isinstance(body, dict):
+        results = body.get("results")
+        if isinstance(results, dict):
+            code = results.get("code")
+            if isinstance(code, str):
+                return code
+    return None
 
 
 def _redact_url(url: str, param: str = "apikey") -> str:
@@ -1201,7 +1214,10 @@ class NewsDataApiClient:
             # Rate limit.
             if response.status_code == 429:
                 retry_after = _parse_retry_after(response.headers.get("Retry-After"))
-                if attempt >= self.max_retries:
+                if (
+                    _extract_error_code(body) in _QUOTA_EXHAUSTED_CODES
+                    or attempt >= self.max_retries
+                ):
                     raise NewsdataRateLimitError(
                         body,
                         status_code=429,
